@@ -10,6 +10,8 @@ from util import tensorWriter
 import torch
 from torch import nn
 
+import pdb
+
 
 class Engine(object):
 
@@ -41,6 +43,7 @@ class Engine(object):
         shared_parser_test.add_argument('-mp', '--model_path', help='this path stores *.pth files')
         shared_parser_test.add_argument('--pth_label', default='latest', help='The label of the pth files. ')
         shared_parser_test.add_argument('-sp', '--save_dir', help='path for saving output images')
+        shared_parser_test.add_argument('-rcb', '--random_crop_bias', type=int, default=0, help='data augmentation: randomly use different bias for cropping')
         parser_test_selected_curve = subparsers.add_parser('test_selected_curve',
                                                            parents=[shared_parser, shared_parser_test])
         parser_test_selected_curve.add_argument('-bl', '--branch_list', nargs='+', type=int, default=[0, 1, 2, 3, 4],
@@ -142,6 +145,8 @@ class Engine(object):
         '''
         from data.attributeDataset import Dataset_testing_filtered, Dataset_testing
         util.mkdir(self.args.save_dir)
+
+        #pdb.set_trace()
 
         n_branch = len(self.args.attr.split(',')) + 1  # n groupped attribute + 1 residual attribute.
         test_model = model.model_deploy(n_branch=n_branch, model_path=self.args.model_path,
