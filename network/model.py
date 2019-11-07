@@ -17,6 +17,29 @@ class encoder(nn.Module):
         y = y[-1]
         return y
 
+class encoder_stacked(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super(encoder_l2, self).__init__()
+        assert in_channels%2 == 0, "input channel of the stacked GAN should be divide by 2!"
+        "
+        model structure of the stacked GAN, use PReLU to keep negative value in latent space.
+        "
+        self.model = nn.Sequential(nn.Conv2d(in_channels, in_channels//2, kernel_size=3, padding=1), 
+                                   nn.PReLU(), 
+                                   nn.MaxPool2d(2, 2), 
+                                   nn.Conv2d(in_channels//2, in_channels//2, kernel_size=3, padding=1),
+                                   nn.PReLU(),
+                                   nn.Conv2d(in_channel//2, out_channels, 1),
+                                   )
+    def forward(self, x):
+        """
+        Args: 
+           @x: (tensor) input tensor. (batch, channel, w, h)
+        Return:
+           (tensor) feature in the stacked latent space (batch, channel//2, w, h)
+        """
+        return self.model(x)
+
 
 class _interp_branch(nn.Module):
     '''

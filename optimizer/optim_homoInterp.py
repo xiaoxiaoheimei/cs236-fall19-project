@@ -94,7 +94,7 @@ class optimizer(base_optimizer):
         torch.save(self.KGTransform.state_dict(), save_dir.format('KGTransform', label))
 
     def optimize_parameters(self, global_step):
-        #pdb.set_trace()
+        pdb.set_trace()
         self.encoder.train()
         self.interp_net.train()
         self.discrim.train()
