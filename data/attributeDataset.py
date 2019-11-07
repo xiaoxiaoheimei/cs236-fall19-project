@@ -220,6 +220,9 @@ class GrouppedAttrDataset(base_dataset.BaseDataset):
         f2 = self.frame['name'].to_frame()
         f3 = self.frame.replace(-1, 0)
 
+        import pdb
+        pdb.set_trace()
+
         for attrs in attributes:
             attrs_split = attrs.split('@')  # '@' separates attributes inside each branch.`
             for i, att in enumerate(attrs_split):
@@ -270,4 +273,3 @@ class GrouppedAttrDataset(base_dataset.BaseDataset):
 
     def __len__(self):
         return len(self.files)
-
