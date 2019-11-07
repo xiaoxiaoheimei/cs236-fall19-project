@@ -13,6 +13,8 @@ import util.tensorWriter as vs
 from collections import OrderedDict
 import tensorboardX
 
+import pdb 
+
 log = logger.logger()
 
 
@@ -92,6 +94,7 @@ class optimizer(base_optimizer):
         torch.save(self.KGTransform.state_dict(), save_dir.format('KGTransform', label))
 
     def optimize_parameters(self, global_step):
+        #pdb.set_trace()
         self.encoder.train()
         self.interp_net.train()
         self.discrim.train()
@@ -108,7 +111,7 @@ class optimizer(base_optimizer):
         ''' compute the target attributes '''
         self.attr_interp = []
         for i, (att, attp) in enumerate(zip(self.attribute, self.attr_permute)):
-            self.attr_interp += [att + self.v[:, i:i + 1] * (attp - att)]
+            self.attr_interp += [att + self.v[:, i:i + 1] * (attp - att)] #use permuted images as the target, v=0/v=1 corresponding to the source/target images respectively.
         ''' pre-computed variables '''
         self.feat = self.encoder(self.image)
         self.feat_permute = self.feat[self.rand_idx]
