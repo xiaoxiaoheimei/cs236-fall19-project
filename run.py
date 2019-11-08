@@ -27,8 +27,14 @@ class Engine(object):
                                    default='/mnt/backup/project/ycchen/datasets/face/images/celeba_aligned',
                                    help='celeba_aligned dataset dir')
         shared_parser.add_argument('--attr',
-                                   default='Mouth_Slightly_Open@Smiling,Male@No_Beard@Mustache@Goatee@Sideburns,Black_Hair@Blond_Hair@Brown_Hair@Gray_Hair,Bald@Receding_Hairline@Bangs,Young',
+                                    default='info/deepfashion_attribute_grouped.txt',
+                                    # default='abstract@abstract_chevron@abstract_chevron_print,acid@acid_wash@applique@bead,a-line@ankle,arrow_collar@asymmetrical_hem,americana',
+                                   # default='Mouth_Slightly_Open@Smiling,Male@No_Beard@Mustache@Goatee@Sideburns,Black_Hair@Blond_Hair@Brown_Hair@Gray_Hair,Bald@Receding_Hairline@Bangs,Young',
                                    help='Target attributes. We use \"@\" to split single attributes, and use \",\" to split grouped attributes')
+
+        shared_parser.add_argument('--attr_txt',
+                                    default='info/deepfashion_attribute_grouped.txt',
+                                    help='substitute of --attr, load from a txt file of same format')
         shared_parser.add_argument('--dec_type', default='v1')
         ''' arguments for training '''
         parser_train = subparsers.add_parser('train', parents=[shared_parser])
@@ -89,15 +95,19 @@ class Engine(object):
         return optim
 
     def load_dataset(self):
-        with open('info/celeba-train.txt', 'r') as f:
+        # with open('info/celeba-train.txt', 'r') as f:
+        with open('info/deepfashion-train.txt', 'r') as f:
             train_list = [os.path.join(self.args.data_dir, tmp.rstrip()) for tmp in f]
-        with open('info/celeba-test.txt', 'r') as f:
+        # with open('info/celeba-test.txt', 'r') as f:
+        with open('info/deepfashion-test.txt', 'r') as f:
             test_list = [os.path.join(self.args.data_dir, tmp.rstrip()) for tmp in f]
+        # csv_path = 'info/celeba-with-orientation.csv'
+        csv_path = 'info/deepfashion.csv'
         train_dataset = attributeDataset.GrouppedAttrDataset(image_list=train_list, attributes=self.args.attr,
-                                                             csv_path='info/celeba-with-orientation.csv', 
+                                                             csv_path=csv_path, crop_size=(200, 200),
                                                              random_crop_bias=self.args.random_crop_bias)
         test_dataset = attributeDataset.GrouppedAttrDataset(image_list=test_list, attributes=self.args.attr,
-                                                            csv_path='info/celeba-with-orientation.csv')
+                                                            crop_size=(200, 200), csv_path=csv_path)
         return train_dataset, test_dataset
 
     def train(self):
@@ -157,8 +167,8 @@ class Engine(object):
             image_list = glob.glob(self.args.test_folder+'/*.jpg')
             test_dataset = Dataset_testing(image_list)
         ref_dataset = Dataset_testing_filtered(self.args.data_dir, self.args.filter_target_attr, n_samples=self.args.n_ref)
-        loader = DataLoader(test_dataset, batch_size=self.args.batch_size, shuffle=True)
-        ref_loader = DataLoader(ref_dataset, batch_size=1, shuffle=True)
+        loader = DataLoader(test_dataset, batch_size=self.args.batch_size, shuffle=True, num_workers=0)
+        ref_loader = DataLoader(ref_dataset, batch_size=1, shuffle=True, num_workers=0)
         # for data, ref_data in zip(loader, ref_loader):
         img_out = [tmp for tmp in ref_loader]
         img_out = torch.cat(img_out)
@@ -190,6 +200,13 @@ class Engine(object):
     def run(self):
         parser = self.parse_args()
         self.args = parser.parse_args()
+
+        # load args.attr from txt
+        if self.args.attr.endswith('.txt'):
+            with open(self.args.attr) as f:
+                attr_string = f.readlines()
+            self.args.attr = attr_string[0]
+
         self.basic_setting()
         exec ('self.{}()'.format(self.args.command))
 

@@ -66,5 +66,3 @@ class TrainEngine(object):
             # self.optimizer.save(e)
             self.optimizer.add_summary_heavy(e)
         self.optimizer.save()
-
-
