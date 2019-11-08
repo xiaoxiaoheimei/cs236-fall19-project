@@ -19,17 +19,19 @@ class encoder(nn.Module):
 
 class encoder_stacked(nn.Module):
     def __init__(self, in_channels, out_channels):
-        super(encoder_l2, self).__init__()
+        super(encoder_stacked, self).__init__()
         assert in_channels%2 == 0, "input channel of the stacked GAN should be divide by 2!"
         "
         model structure of the stacked GAN, use PReLU to keep negative value in latent space.
         "
         self.model = nn.Sequential(nn.Conv2d(in_channels, in_channels//2, kernel_size=3, padding=1), 
+                                   nn.BatchNorm2d(in_channels//2), 
                                    nn.PReLU(), 
                                    nn.MaxPool2d(2, 2), 
                                    nn.Conv2d(in_channels//2, in_channels//2, kernel_size=3, padding=1),
+                                   nn.BatchNorm2d(in_channels//2),
                                    nn.PReLU(),
-                                   nn.Conv2d(in_channel//2, out_channels, 1),
+                                   nn.Conv2d(in_channels//2, out_channels, 1)
                                    )
     def forward(self, x):
         """
@@ -37,6 +39,30 @@ class encoder_stacked(nn.Module):
            @x: (tensor) input tensor. (batch, channel, w, h)
         Return:
            (tensor) feature in the stacked latent space (batch, channel//2, w, h)
+        """
+        return self.model(x)
+
+class decoder_stacked(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super(decoder_stacked, self).__init__()
+        """
+        Try to reverse every operation applied in the encoder.
+        """
+        self.model = nn.Sequential(nn.Conv2d(in_channels, in_channels, 1),
+                                   nn.BatchNorm2d(in_channels), 
+                                   nn.PReLU(),
+                                   nn.Conv2d(in_channels, 2*in_channels, kernel_size=3, padding=1),
+                                   nn.BatchNorm2d(in_channels),
+                                   nn.PReLU(),
+                                   nn.Upsample(scale_factor=2, mode='nearest'), 
+                                   nn.Conv2d(2*in_channels, output_channels, kernel_size=3, padding=1)
+                                   )
+    def forward(self, x):
+        """
+        Args:
+          @x: (tensor) input tensor, (batch, in_channels, w, h)
+        Return:
+          (tensor) feature re-mapped to the latent space.
         """
         return self.model(x)
 
