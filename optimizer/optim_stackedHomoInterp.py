@@ -121,12 +121,8 @@ class optimizer(base_optimizer):
         for i, (att, attp) in enumerate(zip(self.attribute, self.attr_permute)):
             self.attr_interp += [att + self.v[:, i:i + 1] * (attp - att)] #use permuted images as the target, v=0/v=1 corresponding to the source/target images respectively.
         ''' pre-computed variables '''
-        self.feat = [self.image]
         #compute latent representation for each stacked layer
-        for stack_encoder in self.encoders:
-            stack_feat = stacked_encoder(self.feat[-1]) #(batch, c_i, w_i, h_i)
-            self.feat.append(stack_feat)
-        self.feat = self.feat[1:]
+        self.feat = self.stacked_encoder(self.image, self.depth)
         self.feat_permute = []
         for feat in self.feat:
             self.feat_permute.append(feat[self.rand_idx])
@@ -153,13 +149,41 @@ class optimizer(base_optimizer):
             self.optim_encoder.step()
             self.optim_interp.step()
 
+    def stacked_encoder(self, image, k):
+        """
+        Args: 
+           image (tensor): image input tensor. (batch, channel, width, height)
+           k (int): id of the latent space, start from 0
+        Return:
+           feats (tensor list): latent representations of the latent spaces 0 to k, [r_{0}, ... , r_{k}]
+        """
+        enc_feats = [image]
+        for encoder in self.encoders[0:k+1]:
+            f = encoder(feats[-1]) 
+            enc_feats.append(f)
+        enc_feats = enc_feats[1:]
+        return enc_feats
+
+    def stacked_decoder(self, feat, k):
+        """
+        Args:
+           k (int): id of the latent space, start from 0
+           feat (tensor): latent representation of the kth latent space
+        Return:
+           dec_feats (tensor list): decoded results through out the stack. [s_{0} (image space), s_{1}, ..., s_{k-1}]
+        """
+        dec_feats = [feat]
+        for decoder in reversed(self.decoders[0:k+1]):
+            f = decoder(dec_feats[-1])
+            dec_feats.append(f)
+        dec_feats = dec_feats[:0:-1]
+        return dec_feats
+
     def compute_dec_loss(self):
         self.loss['dec'] = 0
         for i, feat in enumerate(self.feat):
             #decode latent feature through stacked GAN
-            for stack_decoder in reversed(self.decoders[0:i+1]):
-                im_out = stack_decoder(feat)
-                feat = im_out
+            im_out = self.stacked_decoder(feat, i)[0]
             self.loss[f'dec_per_stack{i}']  = self.perceptural_loss(im_out, self.image) #the perceptural loss of the ith GAN
             self.loss['dec'] += self.loss[f'dec_per_stack{i}'] * self.lw[i]
             self.loss[f'dec_mse_stack{i}'] = nn.MSELoss()(im_out, self.image.detach()) #why detach here
@@ -235,6 +259,51 @@ class optimizer(base_optimizer):
     def get_current_errors(self):
         return self.loss
 
+    def stacked_interp_test(self, img1, img2):
+        """
+        Interp in kth latent space
+        Args:
+          img1, img2 (tensor): img1@soure, img2@target, (channel, height, width)
+          k (int): id of the interpolated latent space.
+        Return:
+          result_full_stack (list of tensor): each element is the interpolated result in a specific latent space.
+        """
+        img1 = img1.unsqueeze(0)
+        img2 = img2.unsqueeze(0)
+        stacked_feat1 = self.stacked_encoder(img1) #list of self.depth elements
+        stacked_feat2 = self.stacked_encoder(img2)
+        result_full_stack = []
+        for i, interp_net, fea1, fea2 in enumerate(zip(self.interp_nets, stacked_feat1, stacked_fea2)):
+            n_branches = interp_net.module.n_branch
+            result_per_stack = []
+            for attr_idx in range(n_branches):
+                result_branch = [img1.data.cpu()]
+                for strength in [0, 0.5, 1]:
+                    attr_vec = torch.zeros(1, n_branches + 1)
+                    attr_vec[:, attr_idx] = strength
+                    attr_vec = util.toVariable(attr_vec).cuda()
+                    interp_feat = interp_net(feat1, feat2, attr_vec)
+                    out_tmp = self.stacked_decoder(interp_feat, i)[0]
+                    result_branch += [out_tmp.data.cpu()]
+                result_branch += [img2.data.cpu()]
+                result_branch = torch.cat(result_branch, dim=3)
+                result_per_stack += [result_branch]
+            result_branch = [img1.data.cpu()]
+            # interpolate all the attributes
+            for strength in [0, 0.5, 1]:
+                attr_vec = torch.ones(1, n_branches) * strength
+                attr_vec = util.toVariable(attr_vec).cuda()
+                interp_feat = interp_net(feat1, feat2, attr_vec)
+                out_tmp = self.stacked_decoder(interp_feat, i)[0]
+                result_branch += [out_tmp.data.cpu()]
+            result_branch += [img2.data.cpu()]
+            result_branch = torch.cat(result_branch, dim=3)
+            result_per_stack += [result_branch]
+            result_per_stack = torch.cat(result_per_stack, dim=2)
+            result_full_stack += [result_per_stack]
+        #result_full_stack = torch.cat(result_full_stack, dim=1)
+        return result_full_stack
+
     def interp_test(self, img1, img2):
         '''
         testing the interpolation effect.
@@ -273,6 +342,52 @@ class optimizer(base_optimizer):
 
         result_map = torch.cat(result_map, dim=2)
         return result_map
+
+    def stacked_save_samples(self, global_step=0):
+        self.encoders.eval()
+        self.interp_nets.eval()
+        self.discrims.eval()
+        self.decoders.eval()
+        n_pairs = 20
+        save_path_single = [os.path.join(self.opt.save_dir, f'samples/single_depth{i}') for i in range(self.depth)]
+        for path in save_path_single:
+            util.mkdir(path)
+        map_single = []
+        n_branches = self.interp_nets[0].module.n_branch
+        for i in range(n_pairs):
+            img1, _ = self.test_dataset[i]
+            img2, _ = self.test_dataset[i + 1]
+            img1 = util.toVariable(img1).cuda()
+            img2 = util.toVariable(img2).cuda()
+            map_single += [self.stacked_interp_test(img1, img2)]
+        for i, stacked_map_single in enumerate(zip(*map_single)):
+            stacked_single_seq = torch.cat(stacked_map_single, dim=0)
+            stacked_single_seq = vs.untransformTensor(stacked_single_seq)
+            vs.writeTensor(os.path.join(save_path_single[i], '%d.jpg' % global_step), stacked_single_seq, nRow=2)
+        ##################################################
+        save_path = [os.path.join(self.opt.save_dir, f'interp_curve_depth{i}') for i in range(self.depth)]
+        for path in save_path:
+            util.mkdir(path)
+        for k, interp_net in enumerate(self.interp_nets):
+            im_out = [self.image.data.cpu()]
+            v = torch.zeros(self.image.size(0), n_branches)
+            v = util.toVariable(v).cuda()
+            feat = interp_net(self.feat[k], self.feat_permute[k], v)
+            out_now = self.stacked_decoder(feat, k)[0]
+            im_out += [out_now.data.cpu()]
+            for i in range(n_branches):
+                log(i)
+                v = torch.zeros(self.image.size(0), n_branches)
+                v[:, 0:i + 1] = 1
+                v = util.toVariable(v).cuda()
+                feat = interp_net(self.feat[k].detach(), self.feat_permute[k].detach(), v)
+                out_now = self.stacked_decoder(feat.detach(), k)[0]
+                im_out += [out_now.data.cpu()]
+            im_out += [self.image_permute.data.cpu()]
+            im_out = [util.toVariable(tmp) for tmp in im_out]
+            im_out = torch.cat(im_out, dim=0)
+            im_out = vs.untransformTensor(im_out.data.cpu())
+            vs.writeTensor('%s/%d.jpg' % (save_path[k], global_step), im_out, nRow=self.image.size(0))
 
     def save_samples(self, global_step=0):
         self.encoder.eval()
