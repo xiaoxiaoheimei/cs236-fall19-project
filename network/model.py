@@ -5,6 +5,7 @@ import torch
 from torch import nn
 from collections import OrderedDict
 from network import base_network
+import pdb
 
 
 class encoder(nn.Module):
@@ -21,9 +22,9 @@ class encoder_stacked(nn.Module):
     def __init__(self, in_channels, out_channels):
         super(encoder_stacked, self).__init__()
         assert in_channels%2 == 0, "input channel of the stacked GAN should be divide by 2!"
-        "
+        '''
         model structure of the stacked GAN, use PReLU to keep negative value in latent space.
-        "
+        '''
         self.model = nn.Sequential(nn.Conv2d(in_channels, in_channels//2, kernel_size=3, padding=1), 
                                    nn.BatchNorm2d(in_channels//2), 
                                    nn.PReLU(), 
@@ -66,6 +67,50 @@ class decoder_stacked(nn.Module):
         """
         return self.model(x)
 
+class discrim_stacked(nn.Module):
+    '''
+    attr is the input attribute list that is consistent with data/attreibuteDataset/Dataset_attr_merged_v2,
+    e.g., Moustache@#No_Beard@Goatee,Smile,Young,Bangs
+    '''
+
+    def __init__(self, attr):
+        super(discrim, self).__init__()
+        self.model = nn.Sequential(
+            nn.Conv2d(128, 64, 1),
+            nn.InstanceNorm2d(32, affine=True),
+            nn.LeakyReLU(0.2, True),
+            nn.Conv2d(64, 32, 3, padding=1, stride=2),
+            nn.InstanceNorm2d(32, affine=True),
+            nn.LeakyReLU(0.2, True),
+            nn.Conv2d(32, 32, 2)
+        )
+        # self.model = nn.Sequential(
+        #     nn.Conv2d(512, 256, 1),
+        #     nn.ReLU(True),
+        #     nn.Conv2d(256, 256, 14),
+        # )
+        self.ifReal = nn.Conv2d(32, 32, 1)
+        # self.attribute = nn.Conv2d(256, n_attributes, 1)
+        attr_branches = []
+        attr = attr.split(',')
+        for i in range(len(attr)):
+            attr_now = attr[i].split('@')
+            branch_now = nn.Conv2d(32, len(attr_now), 1)
+            attr_branches += [branch_now]
+        attr_branches = nn.ModuleList(attr_branches)
+        self.attr_branches = attr_branches
+        self.model = self.model
+        self.ifReal = self.ifReal
+
+    def forward(self, x):
+        #pdb.set_trace()
+        y = self.model(x)
+        ifReal = self.ifReal(y)
+        attributes = []
+        for branch_now in self.attr_branches:
+            attribute_now = branch_now(y).squeeze(2).squeeze(2)
+            attributes += [attribute_now]
+        return ifReal, attributes
 
 class _interp_branch(nn.Module):
     '''
@@ -102,6 +147,7 @@ class interp_net(nn.Module):
         self.branch = nn.ModuleList(branch)
 
     def forward(self, feat1, feat2, selective_vector, **kwargs):
+        pdb.set_trace()
         y = feat2 - feat1
         selective_tensor = selective_vector.unsqueeze(2).unsqueeze(3)
         selective_tensor = selective_tensor.expand((-1, -1, y.size(2), y.size(3)))
@@ -209,6 +255,7 @@ class discrim(nn.Module):
         self.ifReal = self.ifReal
 
     def forward(self, x):
+        #pdb.set_trace()
         y = self.model(x)
         ifReal = self.ifReal(y)
         attributes = []

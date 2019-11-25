@@ -10,6 +10,8 @@ from util import tensorWriter
 import torch
 from torch import nn
 
+from optimizer import optim_stackedHomoInterp
+
 import pdb
 
 
@@ -84,9 +86,34 @@ class Engine(object):
 
         return encoder, interp, decoder, discrim
 
+    '''
+    Two layers interpolation stack
+    '''
+    def define_stacked_model(self):
+        encoders = nn.ModuleList([model.encoder(), model.encoder_stacked(in_channels=512, out_channels=128)])
+        n_branch = len(self.args.attr.split(','))
+        interps = nn.ModuleList([model.interp_net(n_branch=n_branch+1) for i in range(2)])
+        if self.args.dec_type == 'v1':
+           decoders = nn.ModuleList([model.decoder(), model.decoder_stacked(in_channels=128, out_channels=512)])
+        elif self.args.dec_type == 'v2':
+           decoders = nn.ModuleList([model.decoder2(), model.decoder_stacked(in_channels=128, out_channels=512)])
+        else:
+           raise NotImplementedError
+        discrims = nn.ModuleList([model.discrim(self.args.attr), model.discrim_stacked(self.args.attr)])
+        encoders = nn.DataParallel(encoders)
+        decoders = nn.DataParallel(decoders)
+        interps = nn.DataParallel(interps)
+        #still don't know why the original code didn't apply nn.DataParallel to the discrimator 
+        
+        return encoders, interps, decoders, discrims
+     
+
     def define_optim(self, model):
         optim = optim_homoInterp.optimizer(model, self.args)
         return optim
+
+    def define_stacked_optim(self, model):
+        optim = optim_stackedHomoInterp.optimizer(model, self.args)
 
     def load_dataset(self):
         with open('info/celeba-train.txt', 'r') as f:
@@ -101,8 +128,10 @@ class Engine(object):
         return train_dataset, test_dataset
 
     def train(self):
-        model = self.define_model()
-        optim = self.define_optim(model)
+        #model = self.define_model()
+        #optim = self.define_optim(model)
+        model = self.define_stacked_model()
+        optim = self.define_stacked_optim(model)
         train_dataset, test_dataset = self.load_dataset()
         optim.test_dataset = test_dataset
         from util import training_framework

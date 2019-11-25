@@ -145,6 +145,7 @@ class optimizer(base_optimizer):
         return self.loss['dec']
 
     def compute_discrim_loss(self):
+        pdb.set_trace()
         self.loss['discrim'] = 0
         discrim_real, real_attr = self.discrim(self.feat.detach())
         discrim_interp, interp_attr = self.discrim(self.feat_interp.detach())
