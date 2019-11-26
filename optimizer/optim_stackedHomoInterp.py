@@ -20,11 +20,11 @@ log = logger.logger()
 
 class optimizer(base_optimizer):
 
-    def __init__(self, model, option=opt.opt()):
+    def __init__(self, model, option=opt.opt(), lw=[1.0, 1.0]):
         super(optimizer, self).__init__()
         self._default_opt()
         self.opt.merge_opt(option)
-        self._get_model(model)
+        self._get_model(model, lw)
         self._get_aux_nets()
         self._define_optim()
         # self.writer = curves.writer(log_dir=self.opt.save_dir + '/log')
@@ -48,7 +48,7 @@ class optimizer(base_optimizer):
         self.interp_nets.zero_grad()
         self.decoders.zero_grad()
         self.discrims.zero_grad()
-        self.KGTransforms.zero_grad()
+        self.KGTransform.zero_grad()
 
     def _get_aux_nets(self):
         self.vgg_teacher = nn.DataParallel(base_network.VGG(pretrained=True)).cuda()
@@ -83,7 +83,7 @@ class optimizer(base_optimizer):
         self.optim_interps = torch.optim.Adam(self.interp_nets.parameters(), lr=1e-4, betas=[0.5, 0.999])
         self.optim_decoders = torch.optim.Adam(self.decoders.parameters(), lr=1e-4)
         self.optim_discrims = torch.optim.Adam(self.discrims.parameters(), lr=1e-4, betas=[0.5, 0.999])
-        self.optim_KGTransforms = torch.optim.Adam(self.KGTransform.parameters(), lr=1e-4)
+        self.optim_KGTransform = torch.optim.Adam(self.KGTransform.parameters(), lr=1e-4)
 
     def load(self, label='latest'):
         save_dir = self.opt.save_dir + '/{}-{}.pth'
@@ -91,7 +91,7 @@ class optimizer(base_optimizer):
         self._check_and_load(self.interp_nets, save_dir.format('interp_nets', label))
         self._check_and_load(self.decoders, save_dir.format('decoders', label))
         self._check_and_load(self.discrims, save_dir.format('discrims', label))
-        self._check_and_load(self.KGTransforms, save_dir.format('KGTransforms', label))
+        self._check_and_load(self.KGTransform, save_dir.format('KGTransform', label))
 
     def save(self, label='latest'):
         save_dir = self.opt.save_dir + '/{}-{}.pth'
@@ -99,15 +99,15 @@ class optimizer(base_optimizer):
         torch.save(self.interp_nets.state_dict(), save_dir.format('interp_net', label))
         torch.save(self.decoders.state_dict(), save_dir.format('decoder', label))
         torch.save(self.discrims.state_dict(), save_dir.format('discrim', label))
-        torch.save(self.KGTransforms.state_dict(), save_dir.format('KGTransform', label))
+        torch.save(self.KGTransform.state_dict(), save_dir.format('KGTransform', label))
 
     def optimize_parameters(self, global_step):
-        pdb.set_trace()
+        #pdb.set_trace()
         self.encoders.train()
         self.interp_nets.train()
         self.discrims.train()
         self.decoders.train()
-        self.KGTransforms.train()
+        self.KGTransform.train()
         self.loss = OrderedDict()
         ''' define v '''
         self.v = util.toVariable(self.generate_select_vector()).cuda() #(batch, branch_num)
@@ -133,11 +133,11 @@ class optimizer(base_optimizer):
 
         self.zero_grad()
         self.compute_dec_loss().backward(retain_graph=True)
-        self.optim_decoder.step()
+        self.optim_decoders.step()
 
         self.zero_grad()
         self.compute_discrim_loss().backward(retain_graph=True)
-        self.optim_discrim.step()
+        self.optim_discrims.step()
 
         self.zero_grad()
         self.compute_KGTransform_loss().backward(retain_graph=True)
@@ -146,8 +146,8 @@ class optimizer(base_optimizer):
         if global_step % self.opt.n_discrim == 0:
             self.zero_grad()
             self.compute_enc_int_loss().backward()
-            self.optim_encoder.step()
-            self.optim_interp.step()
+            self.optim_encoders.step()
+            self.optim_interps.step()
 
     def stacked_encoder(self, image, k):
         """
@@ -159,7 +159,7 @@ class optimizer(base_optimizer):
         """
         enc_feats = [image]
         for encoder in self.encoders[0:k+1]:
-            f = encoder(feats[-1]) 
+            f = encoder(enc_feats[-1]) 
             enc_feats.append(f)
         enc_feats = enc_feats[1:]
         return enc_feats
@@ -167,7 +167,7 @@ class optimizer(base_optimizer):
     def stacked_decoder(self, feat, k):
         """
         Args:
-           k (int): id of the latent space, start from 0
+           k (int): id of the latent space, starting from 0
            feat (tensor): latent representation of the kth latent space
         Return:
            dec_feats (tensor list): decoded results through out the stack. [s_{0} (image space), s_{1}, ..., s_{k-1}]
@@ -179,8 +179,25 @@ class optimizer(base_optimizer):
         dec_feats = dec_feats[:0:-1]
         return dec_feats
 
+    def stacked_partial_dec(self, feat, top, bottom):
+        """
+        Args:
+           top (int): id of the top latent space in decoding stack (starting from 0).
+           end (int): id of the bottom latent space in decoding stack (starting from 0).
+           feat (tensor): latent representation of the bottom latent space
+        Return:
+           dec_feats (tensor list): decoded results of stack segment. [s_{bottom}, s_{bottom+1}, ..., s_{top}].
+        """
+        dec_feats = [feat]
+        for decoder in reversed(self.decoders[bottom+1:top+1]):
+            f = decoder(dec_feats[-1])
+            dec_feats.append(f)
+        dec_feats = dec_feats[::-1]
+        return dec_feats
+
     def compute_dec_loss(self):
         self.loss['dec'] = 0
+        #pdb.set_trace()
         for i, feat in enumerate(self.feat):
             #decode latent feature through stacked GAN
             im_out = self.stacked_decoder(feat, i)[0]
@@ -191,8 +208,9 @@ class optimizer(base_optimizer):
         return self.loss['dec']
 
     def compute_discrim_loss(self):
+        #pdb.set_trace()
         self.loss['discrim'] = 0
-        for i, discrim, feat, feat_interp in enumerate(zip(self.discrims, self.feat, self.feat_interp)):
+        for i, (discrim, feat, feat_interp) in enumerate(zip(self.discrims, self.feat, self.feat_interp)):
             discrim_real, real_attr = discrim(feat.detach())
             discrim_interp, interp_attr = discrim(feat_interp.detach())
             ''' gradient penality '''
@@ -208,22 +226,24 @@ class optimizer(base_optimizer):
             att_detach = [att.detach() for att in self.attribute]
             self.loss[f'discrim_cls_stack{i}'] = classification_loss_list(interp_attr, att_detach) #Rigorous Training in each latent space
             self.loss['discrim'] += self.loss[f'discrim_cls_stack{i}'] * self.lw[i]
-            return self.loss['discrim']
+        return self.loss['discrim']
 
     def compute_KGTransform_loss(self):
         self.loss['KGTransform'] = 0
         feat_T1 = self.vgg_teacher(self.image)[-1]
-        for feat, KGTransform in zip(self.feat, self.KGTransforms):
-            feat_T2 = self.KGTransform(feat)
+        for i, feat in enumerate(self.feat):
+            feat_at0 = self.stacked_partial_dec(feat, i, 0)[0] #project the latent representtion in i-th layer back to latent representation in 0-th layer
+            feat_T2 = self.KGTransform(feat_at0)
             self.loss[f'KGTransform_stack{i}'] = nn.MSELoss()(feat_T2, feat_T1.detach())
             self.loss['KGTransform'] += self.loss[f'KGTransform_stack{i}'] * self.lw[i]
         return self.loss['KGTransform']
 
     def compute_enc_int_loss(self):
+        #pdb.set_trace()
         self.loss['enc_int'] = 0
         # discrim_real, out_attr = self.discrim(self.feat)
-        for i, feat, feat_permute, feat_interp in enumerate(zip(self.feat, self.feat_permute, self.feat_interp)):
-            discrim_interp, interp_attr = discrim[i](feat_interp)
+        for i, (feat, feat_permute, feat_interp) in enumerate(zip(self.feat, self.feat_permute, self.feat_interp)):
+            discrim_interp, interp_attr = self.discrims[i](feat_interp)
             ''' GAN loss '''
             self.loss[f'enc_int_gan_stack{i}'] = -discrim_interp.mean()
             self.loss['enc_int'] += self.loss[f'enc_int_gan_stack{i}'] * self.lw[i]
@@ -241,18 +261,15 @@ class optimizer(base_optimizer):
             # self.loss['enc_int_none'] = nn.MSELoss()(feat_interp_none, self.feat.detach())
             # self.loss['enc_int'] += self.loss['enc_int_none']
             ''' reconstruction loss '''
-            feat_t = feat
-            for stack_decoder in reversed(self.decoders[0:i+1]):
-                im_out = stack_decoder(feat_t)
-                feat_t = im_out
-            loss[f'enc_int_mse_stack{i}'] = nn.MSELoss()(im_out, self.image.detach())
+            im_out = self.stacked_partial_dec(feat, i, -1)[0]
+            self.loss[f'enc_int_mse_stack{i}'] = nn.MSELoss()(im_out, self.image.detach())
             self.loss['enc_int'] += self.loss[f'enc_int_mse_stack{i}'] * self.lw[i]
-            self.loss['enc_int_per_stack{i}'] = self.perceptural_loss(im_out, self.image.detach())
+            self.loss[f'enc_int_per_stack{i}'] = self.perceptural_loss(im_out, self.image.detach())
             self.loss['enc_int'] += self.loss[f'enc_int_per_stack{i}'] * self.lw[i]
-            ''' knowledge guidance loss '''
-            feat_T1 = self.vgg_teacher(self.image)[-1]
-            feat_T2 = self.KGTransforms[i](feat)
-            self.loss[f'enc_int_KG_stack{i}'] = nn.MSELoss()(feat_T2, feat_T1.detach())
+        ''' knowledge guidance loss '''
+        self.compute_KGTransform_loss()
+        for i in range(self.depth):
+            self.loss[f'enc_int_KG_stack{i}'] = self.loss[f'KGTransform_stack{i}']
             self.loss['enc_int'] += self.loss[f'enc_int_KG_stack{i}'] * self.lw[i]
         return self.loss['enc_int']
 
@@ -273,7 +290,7 @@ class optimizer(base_optimizer):
         stacked_feat1 = self.stacked_encoder(img1) #list of self.depth elements
         stacked_feat2 = self.stacked_encoder(img2)
         result_full_stack = []
-        for i, interp_net, fea1, fea2 in enumerate(zip(self.interp_nets, stacked_feat1, stacked_fea2)):
+        for i, (interp_net, fea1, fea2) in enumerate(zip(self.interp_nets, stacked_feat1, stacked_fea2)):
             n_branches = interp_net.module.n_branch
             result_per_stack = []
             for attr_idx in range(n_branches):
@@ -390,10 +407,10 @@ class optimizer(base_optimizer):
             vs.writeTensor('%s/%d.jpg' % (save_path[k], global_step), im_out, nRow=self.image.size(0))
 
     def save_samples(self, global_step=0):
-        self.encoder.eval()
-        self.interp_net.eval()
-        self.discrim.eval()
-        self.decoder.eval()
+        self.encoders.eval()
+        self.interp_nets.eval()
+        self.discrims.eval()
+        self.decoders.eval()
         n_pairs = 20
         save_path_single = os.path.join(self.opt.save_dir, 'samples/single')
         util.mkdir(save_path_single)
@@ -476,7 +493,7 @@ class optimizer(base_optimizer):
             raise NotImplemented
 
     def generate_select_vector(self, type='uniform'):
-        n_branches = self.interp_net.module.n_branch
+        n_branches = self.interp_nets[0].module.n_branch
         return self._generate_select_vector(n_branches, type)
 
     def random_interpolate(self, gt, pred):

@@ -53,10 +53,10 @@ class decoder_stacked(nn.Module):
                                    nn.BatchNorm2d(in_channels), 
                                    nn.PReLU(),
                                    nn.Conv2d(in_channels, 2*in_channels, kernel_size=3, padding=1),
-                                   nn.BatchNorm2d(in_channels),
+                                   nn.BatchNorm2d(2*in_channels),
                                    nn.PReLU(),
                                    nn.Upsample(scale_factor=2, mode='nearest'), 
-                                   nn.Conv2d(2*in_channels, output_channels, kernel_size=3, padding=1)
+                                   nn.Conv2d(2*in_channels, out_channels, kernel_size=3, padding=1)
                                    )
     def forward(self, x):
         """
@@ -74,10 +74,10 @@ class discrim_stacked(nn.Module):
     '''
 
     def __init__(self, attr):
-        super(discrim, self).__init__()
+        super(discrim_stacked, self).__init__()
         self.model = nn.Sequential(
             nn.Conv2d(128, 64, 1),
-            nn.InstanceNorm2d(32, affine=True),
+            nn.InstanceNorm2d(64, affine=True),
             nn.LeakyReLU(0.2, True),
             nn.Conv2d(64, 32, 3, padding=1, stride=2),
             nn.InstanceNorm2d(32, affine=True),
@@ -147,7 +147,7 @@ class interp_net(nn.Module):
         self.branch = nn.ModuleList(branch)
 
     def forward(self, feat1, feat2, selective_vector, **kwargs):
-        pdb.set_trace()
+        #pdb.set_trace()
         y = feat2 - feat1
         selective_tensor = selective_vector.unsqueeze(2).unsqueeze(3)
         selective_tensor = selective_tensor.expand((-1, -1, y.size(2), y.size(3)))
