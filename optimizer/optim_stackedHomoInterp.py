@@ -287,10 +287,10 @@ class optimizer(base_optimizer):
         """
         img1 = img1.unsqueeze(0)
         img2 = img2.unsqueeze(0)
-        stacked_feat1 = self.stacked_encoder(img1) #list of self.depth elements
-        stacked_feat2 = self.stacked_encoder(img2)
+        stacked_feat1 = self.stacked_encoder(img1, self.depth) #list of self.depth elements
+        stacked_feat2 = self.stacked_encoder(img2, self.depth)
         result_full_stack = []
-        for i, (interp_net, fea1, fea2) in enumerate(zip(self.interp_nets, stacked_feat1, stacked_fea2)):
+        for i, (interp_net, fea1, fea2) in enumerate(zip(self.interp_nets, stacked_feat1, stacked_feat2)):
             n_branches = interp_net.module.n_branch
             result_per_stack = []
             for attr_idx in range(n_branches):
@@ -299,7 +299,7 @@ class optimizer(base_optimizer):
                     attr_vec = torch.zeros(1, n_branches + 1)
                     attr_vec[:, attr_idx] = strength
                     attr_vec = util.toVariable(attr_vec).cuda()
-                    interp_feat = interp_net(feat1, feat2, attr_vec)
+                    interp_feat = interp_net(fea1, fea2, attr_vec)
                     out_tmp = self.stacked_decoder(interp_feat, i)[0]
                     result_branch += [out_tmp.data.cpu()]
                 result_branch += [img2.data.cpu()]
@@ -310,7 +310,7 @@ class optimizer(base_optimizer):
             for strength in [0, 0.5, 1]:
                 attr_vec = torch.ones(1, n_branches) * strength
                 attr_vec = util.toVariable(attr_vec).cuda()
-                interp_feat = interp_net(feat1, feat2, attr_vec)
+                interp_feat = interp_net(fea1, fea2, attr_vec)
                 out_tmp = self.stacked_decoder(interp_feat, i)[0]
                 result_branch += [out_tmp.data.cpu()]
             result_branch += [img2.data.cpu()]
@@ -365,6 +365,7 @@ class optimizer(base_optimizer):
         self.interp_nets.eval()
         self.discrims.eval()
         self.decoders.eval()
+        #pdb.set_trace()
         n_pairs = 20
         save_path_single = [os.path.join(self.opt.save_dir, f'samples/single_depth{i}') for i in range(self.depth)]
         for path in save_path_single:

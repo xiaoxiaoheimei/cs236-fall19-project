@@ -51,8 +51,10 @@ class TrainEngine(object):
                                                                    print_msg=False))
                     self.optimizer.add_summary(global_step)
                 if (global_step) % 1000 == 0:
+                #if (global_step) % 1 == 0: #test case
                     log('save samples ', global_step)
-                    self.optimizer.save_samples(global_step)
+                    #self.optimizer.save_samples(global_step)
+                    self.optimizer.stacked_save_samples(global_step)
                 if global_step > 0 and global_step % 2000 == 0:
                     self.optimizer.save()
                 global_step += 1
