@@ -200,11 +200,15 @@ class optimizer(base_optimizer):
         #pdb.set_trace()
         for i, feat in enumerate(self.feat):
             #decode latent feature through stacked GAN
-            im_out = self.stacked_decoder(feat, i)[0]
+            stacked_feat = self.stacked_decoder(feat, i)
+            im_out = stacked_feat[0]
             self.loss[f'dec_per_stack{i}']  = self.perceptural_loss(im_out, self.image) #the perceptural loss of the ith GAN
             self.loss['dec'] += self.loss[f'dec_per_stack{i}'] * self.lw[i]
             self.loss[f'dec_mse_stack{i}'] = nn.MSELoss()(im_out, self.image.detach()) #why detach here
             self.loss['dec'] += self.loss[f'dec_mse_stack{i}'] * self.lw[i]
+            if i >= 1:
+               self.loss[f'dec_rev_stack{i}'] = nn.MSELoss()(stacked_feat[-1], self.feat[i-1].detach()) #detach to avoid impact to encoder
+               self.loss['dec'] += self.loss[f'dec_rev_stack{i}']
         return self.loss['dec']
 
     def compute_discrim_loss(self):

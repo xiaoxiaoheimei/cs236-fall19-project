@@ -79,7 +79,10 @@ class discrim_stacked(nn.Module):
             nn.Conv2d(128, 64, 1),
             nn.InstanceNorm2d(64, affine=True),
             nn.LeakyReLU(0.2, True),
-            nn.Conv2d(64, 32, 3, padding=1, stride=2),
+            nn.Conv2d(64, 32, 3, padding=1),
+            nn.InstanceNorm2d(32, affine=True),
+            nn.LeakyReLU(0.2, True),
+            nn.Conv2d(32, 32, 3, padding=1, stride=2),
             nn.InstanceNorm2d(32, affine=True),
             nn.LeakyReLU(0.2, True),
             nn.Conv2d(32, 32, 2)
