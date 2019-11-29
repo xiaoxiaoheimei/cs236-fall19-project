@@ -15,6 +15,7 @@ from util.logger import logger
 import cv2
 import random
 from tqdm import tqdm
+import pdb
 
 log = logger()
 mean = torch.Tensor((0.485, 0.456, 0.406))
@@ -220,9 +221,6 @@ class GrouppedAttrDataset(base_dataset.BaseDataset):
         f2 = self.frame['name'].to_frame()
         f3 = self.frame.replace(-1, 0)
 
-        import pdb
-        pdb.set_trace()
-
         for attrs in attributes:
             attrs_split = attrs.split('@')  # '@' separates attributes inside each branch.`
             for i, att in enumerate(attrs_split):
@@ -239,13 +237,21 @@ class GrouppedAttrDataset(base_dataset.BaseDataset):
             # log(attr_value)
             # log(attrs)
             f2[attrs] = attr_value
+
         self.frame = f2
 
     def __getitem__(self, index):
         try:
-            # print(self.files[index])
             img = util.readRGB(self.files[index]).astype(np.float32)
-            image_name = os.path.basename(self.files[index])
+
+            # support img path with subfolder
+            image_name = self.files[index].split('/')
+            for i, char in enumerate(self.files[index].split('/')):
+                if char == 'img':
+                    del image_name[:i]
+                    image_name = '/'.join(image_name)
+            # image_name = os.path.basename(self.files[index])
+            # pdb.set_trace()
             orientation = self.orientation[image_name]
             if orientation == 'right':
                 img = cv2.flip(img, 1)
@@ -255,10 +261,13 @@ class GrouppedAttrDataset(base_dataset.BaseDataset):
                 raise RuntimeError
 
             if self.crop_size[0] > 0:
+                # pad if crop_size larger than height or width
+                img = util.center_pad(img, self.crop_size)
                 if self.random_crop_bias > 0:
                     img = util.random_crop(img, self.crop_size, (self.random_crop_bias, self.random_crop_bias))
                 else:
                     img = util.center_crop(img, self.crop_size, self.bias)
+
             if self.scale[0] > 0:
                 img = scipy.misc.imresize(img, [self.scale[0], self.scale[1]])
             # img = img[self.crop_size[0]:shape[0] - self.crop_size[0], self.crop_size[1]:shape[1] - self.crop_size[1], :]
