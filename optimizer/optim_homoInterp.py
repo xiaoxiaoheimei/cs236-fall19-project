@@ -38,6 +38,7 @@ class optimizer(base_optimizer):
 
     def set_input(self, input):
         self.image, self.attribute = input
+        # self.image, self.attribute, self.label = input
         self.image = util.toVariable(self.image).cuda()
         self.attribute = [util.toVariable(att.cuda()) for att in self.attribute]
 
