@@ -11,6 +11,7 @@ import torch
 from torch import nn
 
 from optimizer import optim_stackedHomoInterp
+from optimizer import optim_stackedHomoInterp_v1
 
 import pdb
 
@@ -32,6 +33,7 @@ class Engine(object):
                                    default='Mouth_Slightly_Open@Smiling,Male@No_Beard@Mustache@Goatee@Sideburns,Black_Hair@Blond_Hair@Brown_Hair@Gray_Hair,Bald@Receding_Hairline@Bangs,Young',
                                    help='Target attributes. We use \"@\" to split single attributes, and use \",\" to split grouped attributes')
         shared_parser.add_argument('--dec_type', default='v1')
+        shared_parser.add_argument('--stack_type', default='s0')
         ''' arguments for training '''
         parser_train = subparsers.add_parser('train', parents=[shared_parser])
         parser_train.add_argument('-sp', '--save_dir', default='checkpoints/default2', help='model save path')
@@ -103,6 +105,19 @@ class Engine(object):
         
         return encoders, interps, decoders, discrims
      
+    def define_stacked_model_v1(self):
+        encoders = nn.ModuleList([nn.DataParallel(model.encoder()), nn.DataParallel(model.encoder_stacked(in_channels=512, out_channels=128))])
+        n_branch = len(self.args.attr.split(','))
+        interps = nn.ModuleList([nn.DataParallel(model.interp_net(n_branch=n_branch+1, channels=512)), nn.DataParallel(model.interp_net(n_branch=n_branch+1, channels=128))])
+        if self.args.dec_type == 'v1':
+           decoders = nn.ModuleList([nn.DataParallel(model.decoder()), nn.DataParallel(model.decoder_stacked2(in_channels=128, out_channels=512))])
+        elif self.args.dec_type == 'v2':
+           decoders = nn.ModuleList([nn.DataParallel(model.decoder2()), nn.DataParallel(model.decoder_stacked2(in_channels=128, out_channels=512))])
+        else:
+           raise NotImplementedError
+        discrims = nn.ModuleList([model.discrim(self.args.attr), model.discrim_stacked(self.args.attr)]) #?still don't know why the original code didn't apply nn.DataParallel to the discrimator 
+        
+        return encoders, interps, decoders, discrims
 
     def define_optim(self, model):
         optim = optim_homoInterp.optimizer(model, self.args)
@@ -110,6 +125,10 @@ class Engine(object):
 
     def define_stacked_optim(self, model):
         optim = optim_stackedHomoInterp.optimizer(model, self.args)
+        return optim
+
+    def define_stacked_optim_v1(self, model):
+        optim = optim_stackedHomoInterp_v1.optimizer(model, self.args)
         return optim
 
     def load_dataset(self):
@@ -128,8 +147,12 @@ class Engine(object):
         #model = self.define_model()
         #optim = self.define_optim(model)
         #pdb.set_trace()
-        model = self.define_stacked_model()
-        optim = self.define_stacked_optim(model)
+        if self.args.stack_type == 's0':
+           model = self.define_stacked_model()
+           optim = self.define_stacked_optim(model)
+        elif self.args.stack_type == 's1':
+           model = self.define_stacked_model_v1()
+           optim = self.define_stacked_optim_v1(model)
         train_dataset, test_dataset = self.load_dataset()
         optim.test_dataset = test_dataset
         from util import training_framework

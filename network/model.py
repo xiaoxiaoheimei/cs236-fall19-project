@@ -27,12 +27,13 @@ class encoder_stacked(nn.Module):
         '''
         self.model = nn.Sequential(nn.Conv2d(in_channels, in_channels//2, kernel_size=3, padding=1), 
                                    nn.BatchNorm2d(in_channels//2), 
-                                   nn.PReLU(), 
+                                   nn.ReLU(), 
                                    nn.MaxPool2d(2, 2), 
                                    nn.Conv2d(in_channels//2, in_channels//2, kernel_size=3, padding=1),
                                    nn.BatchNorm2d(in_channels//2),
-                                   nn.PReLU(),
-                                   nn.Conv2d(in_channels//2, out_channels, 1)
+                                   nn.ReLU(),
+                                   nn.Conv2d(in_channels//2, out_channels, 1),
+                                   nn.ReLU()
                                    )
     def forward(self, x):
         """
@@ -51,12 +52,13 @@ class decoder_stacked(nn.Module):
         """
         self.model = nn.Sequential(nn.Conv2d(in_channels, in_channels, 1),
                                    nn.BatchNorm2d(in_channels), 
-                                   nn.PReLU(),
+                                   nn.ReLU(),
                                    nn.Conv2d(in_channels, 2*in_channels, kernel_size=3, padding=1),
                                    nn.BatchNorm2d(2*in_channels),
-                                   nn.PReLU(),
+                                   nn.ReLU(),
                                    nn.Upsample(scale_factor=2, mode='nearest'), 
-                                   nn.Conv2d(2*in_channels, out_channels, kernel_size=3, padding=1)
+                                   nn.Conv2d(2*in_channels, out_channels, kernel_size=3, padding=1),
+                                   nn.ReLU()
                                    )
     def forward(self, x):
         """
@@ -218,6 +220,18 @@ class decoder(nn.Module):
         y = self.model(x)
         return y
 
+class decoder_stacked2(nn.Module):
+      def __init__(self, in_channels, out_channels):
+          super(decoder_stacked2, self).__init__()
+          self.dec1 = decoder_stacked(in_channels, out_channels)
+          self.dec2 = decoder()
+      def reverse(self, x):
+          y = self.dec1(x)
+          return y
+      def forward(self, x):
+          y1 = self.dec1(x)
+          y2 = self.dec2(y1)
+          return y1, y2
 
 class discrim(nn.Module):
     '''
