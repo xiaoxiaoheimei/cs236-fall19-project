@@ -147,9 +147,25 @@ class discriminator(nn.Module):
 class decoder_face_rotate(nn.Module):
     def __init__(self):
         super(decoder_face_rotate, self).__init__()
-        self.lm_decoder = nn.Conv2d(2048, 512, kernel_size=1, padding=0)
+        self.lm_encoder = nn.Sequential(*[
+            nn.Conv2d(2, 32, kernel_size=7, stride=2, padding=3),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=0),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=0),
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
+            nn.Conv2d(128, 256, kernel_size=3, stride=2, padding=0),
+            nn.BatchNorm2d(256),
+            nn.ReLU(),
+            nn.Conv2d(256, 256, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(256),
+            nn.ReLU()])
+
         self.model = nn.Sequential(*[
-            nn.Conv2d(2048+512, 512, kernel_size=1, padding=0),
+            nn.Conv2d(2048+256, 512, kernel_size=1, padding=0),
             nn.BatchNorm2d(512),
             nn.ReLU(),
             res_block(in_channels=512, out_channels=512),
@@ -169,8 +185,8 @@ class decoder_face_rotate(nn.Module):
             # nn.Tanh(),
         ])
 
-    def forward(self, feat_id, feat_lm):
-        feat_lm = self.lm_decoder(feat_lm)
+    def forward(self, feat_id, lm):
+        feat_lm = self.lm_encoder(lm)
         feat = torch.cat([feat_id, feat_lm], dim=1)
         y = self.model(feat)
         # return (y + 1) * 0.5

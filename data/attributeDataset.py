@@ -29,7 +29,10 @@ forward_transform = tv.transforms.Compose(
         tv.transforms.Normalize(mean=mean, std=stdv),
     ])
 
-
+landmark_transform = tv.transforms.Compose(
+    [
+        tv.transforms.ToTensor(),
+    ])
 # class Dataset(base_dataset.BaseDataset):
 #     def __init__(self, image_list, transform=forward_transform, scale=(128, 128), crop_size=(160, 160),
 #                  bias=(0, 15),
@@ -208,6 +211,7 @@ class GrouppedAttrDataset(base_dataset.BaseDataset):
 
         print('* Total Images: {}'.format(len(self.files)))
         self.transform = transform
+        self.transform_lm = landmark_transform
         self.scale = scale
         self.bias = bias
         self.frame = pd.read_csv(csv_path, sep=csv_split)
@@ -288,7 +292,8 @@ class GrouppedAttrLandmarkDataset(base_dataset.BaseDataset):
     however, it does not treat the "@" as "or", but concate them.
     '''
 
-    def __init__(self, image_list, attributes, transform=forward_transform, scale=(128, 128), crop_size=(160, 160),
+    def __init__(self, image_list, attributes, transform=forward_transform, transform_lm=landmark_transform,
+                 scale=(128, 128), crop_size=(160, 160),
                  bias=(0, 15), img_dir_path='../img_align_celeba/', landmark_dir_path='../img_landmark/',
                  csv_path='info/celeba-with-orientation.csv', csv_split=',', random_crop_bias=0,
                  label_path='info/img_label.csv'):
@@ -313,6 +318,7 @@ class GrouppedAttrLandmarkDataset(base_dataset.BaseDataset):
         landmark_mean_path = os.path.join(landmark_dir_path, 'mean.jpg')
         self.landmark_mean = util.readBW(landmark_mean_path).astype(np.float32)
         self.transform = transform
+        self.transform_lm = transform_lm
         self.scale = scale
         self.bias = bias
         self.frame = pd.read_csv(csv_path, sep=csv_split)
@@ -353,8 +359,8 @@ class GrouppedAttrLandmarkDataset(base_dataset.BaseDataset):
             landmark_path = os.path.join(self.landmark_dir_path, self.files[index])
             img = util.readRGB(img_path).astype(np.float32)
             landmark = util.readBW(landmark_path).astype(np.float32)
-            landmark_diff = 255*((landmark + self.landmark_mean)>0)
-            landmark_ch3 = np.stack([landmark, self.landmark_mean, landmark_diff], axis=2)
+            landmark_ch3 = np.stack([landmark, self.landmark_mean, np.zeros_like(self.landmark_mean)], axis=2)
+
             image_name = os.path.basename(self.files[index])
 
             orientation = self.orientation[image_name]
@@ -382,8 +388,9 @@ class GrouppedAttrLandmarkDataset(base_dataset.BaseDataset):
                 landmark_ch3 = scipy.misc.imresize(landmark_ch3, [self.scale[0], self.scale[1]])
 
             img = self.transform(img)
-            # Pa, Pb, Pa+Pb
-            landmark_trans = self.transform(landmark_ch3)
+            # Pa, Pb, _
+            landmark_trans = self.transform_lm(landmark_ch3)
+            landmark_trans = landmark_trans[:2,:,:]
             # Pa, Pa, 0
             landmark_same = torch.zeros_like(landmark_trans)
             landmark_same[0,:,:] = landmark_trans[0,:,:]
@@ -392,7 +399,7 @@ class GrouppedAttrLandmarkDataset(base_dataset.BaseDataset):
             attribute = self.frame[self.frame['name'] == image_name]
             attribute = attribute.values[0][1:]
             attribute = tuple(attribute)
-            
+
             label = self.frame_label[self.frame_label['file_name'] == image_name]['label'].item()
             return img, attribute, int(label), landmark_trans, landmark_same
         except:

@@ -10,10 +10,11 @@ import scipy as sci
 from skimage import draw
 
 
-# In[64]:
+# In[105]:
 
 
-data_path = '/Volumes/Padlock/cerebA/'
+# data_path = '/Volumes/Padlock/cerebA/'
+data_path = '/data/jiahong/CS236/cerebA/'
 landmark_txt_path = data_path + 'Anno/list_landmarks_align_celeba.txt'
 
 with open(landmark_txt_path) as f:
@@ -95,4 +96,38 @@ for i in range(100):
     sci.misc.imsave(img_path, img)
 
 
-# In[ ]:
+# In[126]:
+
+
+# save landmark img for all images
+img_dst_path = data_path + 'img_landmark/'
+for i, marks in enumerate(landmarks):
+    img_num = format(i+1, '06d')
+    img = np.zeros((218, 178))
+    rr_all = np.empty(0,).astype(int)
+    cc_all = np.empty(0,).astype(int)
+    for j in range(5):
+        rr, cc = draw.circle(landmarks[i,2*j+1], landmarks[i,2*j], radius=5, shape=img.shape)
+        rr_all = np.concatenate([rr_all, rr])
+        cc_all = np.concatenate([cc_all, cc])
+    img[rr_all, cc_all] = 1
+    img_path = img_dst_path + img_num + '.jpg'
+    sci.misc.imsave(img_path, img)
+    if i % 1000 == 0:
+        print('save landmark images, ', i)
+
+
+# In[131]:
+
+
+# save mean landmarks
+img = np.zeros((218, 178))
+rr_mean = np.empty(0,).astype(int)
+cc_mean = np.empty(0,).astype(int)
+for j in range(5):
+    rr, cc = draw.circle(landmarks_mean[2*j+1], landmarks_mean[2*j], radius=5, shape=img.shape)
+    rr_mean = np.concatenate([rr_mean, rr])
+    cc_mean = np.concatenate([cc_mean, cc])
+img[rr_mean, cc_mean] = 1
+img_path = img_dst_path + 'mean.jpg'
+sci.misc.imsave(img_path, img)

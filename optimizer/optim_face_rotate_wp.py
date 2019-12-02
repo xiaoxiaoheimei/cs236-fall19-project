@@ -187,7 +187,7 @@ class optimizer(base_optimizer):
         x_lm_r = alpha * self.IBPb + (1 - alpha) * self.IaPa
         pred_lm_r = self.discrim_lm(x_lm_r)
         self.loss['dis_lm_gp'] = util.gradient_penalty(x_lm_r, pred_lm_r)
-        self.loss['dis_lm'] += 10. * self.loss['dis_lm_gp']
+        self.loss['dis_lm'] += 100. * self.loss['dis_lm_gp']
         return self.loss['dis_lm']
 
     def get_current_errors(self):
