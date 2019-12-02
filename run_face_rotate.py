@@ -108,8 +108,10 @@ def define_optim(model):
 def define_model():
     encoder = resnet50.Resnet50_ft()
     decoder = decoder_face_rotate()
-    discrim_real = discriminator(in_channels=3)
-    discrim_lm = discriminator(in_channels=4)
+    # discrim_real = discriminator(in_channels=3)
+    # discrim_lm = discriminator(in_channels=4)
+    discrim_real = discriminator(in_channels=3, wgan=False)
+    discrim_lm = discriminator(in_channels=4, wgan=False)
     encoder = nn.DataParallel(encoder)
     decoder = nn.DataParallel(decoder)
     discrim_real = nn.DataParallel(discrim_real)
@@ -117,8 +119,9 @@ def define_model():
     return encoder, decoder, discrim_real, discrim_lm
 
 class discriminator(nn.Module):
-    def __init__(self, in_channels=3):
+    def __init__(self, in_channels=3, wgan=True):
         super(discriminator, self).__init__()
+        self.wgan = wgan
         self.model = nn.Sequential(*[
             nn.Conv2d(in_channels, 32, kernel_size=3, stride=2, padding=0),
             nn.LeakyReLU(0.2),
@@ -140,7 +143,8 @@ class discriminator(nn.Module):
         # print('input', x.shape)
         bs = x.shape[0]
         x = self.model(x)
-        x = self.fn(x.view(bs,-1))
+        if self.wgan == True:
+            x = self.fn(x.view(bs,-1))
         return x
 
 

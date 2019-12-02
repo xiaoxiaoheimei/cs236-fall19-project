@@ -4,7 +4,6 @@ the trainer for the homomorphic interpolation model
 from __future__ import print_function
 import torch
 from torch import nn
-import torch.nn.functional as F
 from optimizer.base_optimizer import base_optimizer
 from network import base_network
 from network.loss import classification_loss_list, perceptural_loss
@@ -106,8 +105,8 @@ class optimizer(base_optimizer):
         self.output_trans = self.decoder(self.feat_identity.detach(), self.landmark_trans.detach())
         self.output_same = self.decoder(self.feat_identity.detach(), self.landmark_same.detach())
 
-        Pa = self.landmark_trans[:,0:1,:,:] / 255.
-        Pb = self.landmark_trans[:,1:2,:,:] / 255.
+        Pa = self.landmark_trans[:,0:1,:,:]
+        Pb = self.landmark_trans[:,1:2,:,:]
         self.IAPb = torch.cat([self.output_same, Pb], dim=1) # Ia', Pb
         self.IaPb = torch.cat([self.image / 255., Pb], dim=1) # Ia, Pb
         self.IBPb = torch.cat([self.output_trans, Pb], dim=1) # Ib', Pb
@@ -141,18 +140,17 @@ class optimizer(base_optimizer):
         self.loss['dec_mse_id_same'] = nn.MSELoss()(self.feat_identity_same, self.feat_identity.detach())
         self.loss['dec'] += 0.1 * self.loss['dec_mse_id_same']
 
-        ''' normal GAN loss '''
+        ''' w-GAN loss '''
         pred_fake_trans = self.discrim_rf(self.output_trans)
         pred_fake_same = self.discrim_rf(self.output_same)
-        self.loss['dec_gan_rf'] = -0.5 * (F.logsigmoid(pred_fake_trans) + F.logsigmoid(pred_fake_same)).mean()
+        self.loss['dec_gan_rf'] = -0.5 * (pred_fake_trans + pred_fake_same).mean()
         self.loss['dec'] += self.loss['dec_gan_rf']
 
         pred_lm_fake_1 = self.discrim_lm(self.IAPb)
         pred_lm_fake_2 = self.discrim_lm(self.IaPb)
         pred_lm_fake_3 = self.discrim_lm(self.IBPb)
         pred_lm_fake_4 = self.discrim_lm(self.IBPa)
-        self.loss['dec_gan_lm'] = -0.25 * (F.logsigmoid(pred_lm_fake_1) + F.logsigmoid(pred_lm_fake_2) + \
-                                    F.logsigmoid(pred_lm_fake_3) + F.logsigmoid(pred_lm_fake_4)).mean()
+        self.loss['dec_gan_lm'] = -0.25 * (pred_lm_fake_1 + pred_lm_fake_2 + pred_lm_fake_3 + pred_lm_fake_4).mean()
         self.loss['dec'] += self.loss['dec_gan_lm']
 
         return self.loss['dec']
@@ -164,10 +162,17 @@ class optimizer(base_optimizer):
         pred_rf_real = self.discrim_rf(self.image.detach()/255.)
 
         self.loss['dis_rf'] = 0
-        ''' normal GAN loss '''
-        self.loss['dis_rf_gan'] = -(0.5*(F.logsigmoid(-pred_fake_trans) + F.logsigmoid(-pred_fake_same)) + \
-                                    F.logsigmoid(pred_rf_real)).mean()
+        ''' w-GAN loss '''
+        self.loss['dis_rf_gan'] = (0.5*(pred_fake_trans + pred_fake_same) - pred_rf_real).mean()
         self.loss['dis_rf'] += self.loss['dis_rf_gan']
+
+        '''gradient-penalty loss '''
+        # TODO: double check here, fake use Ib', Pb
+        alpha = torch.rand(self.batch_size, 1, 1, 1).cuda()
+        x_rf_r = alpha * self.output_trans + (1 - alpha) * self.image
+        pred_rf_r = self.discrim_rf(x_rf_r)
+        self.loss['dis_rf_gp'] = util.gradient_penalty(x_rf_r, pred_rf_r)
+        self.loss['dis_rf'] += 100. * self.loss['dis_rf_gp']
 
         return self.loss['dis_rf']
 
@@ -180,11 +185,17 @@ class optimizer(base_optimizer):
         pred_lm_real = self.discrim_lm(self.IaPa.detach())
 
         self.loss['dis_lm'] = 0
-        ''' normal GAN loss '''
-        self.loss['dis_lm_gan'] = -(0.25*(F.logsigmoid(-pred_lm_fake_1) + F.logsigmoid(-pred_lm_fake_2) + \
-                                    F.logsigmoid(-pred_lm_fake_3) + F.logsigmoid(-pred_lm_fake_4)) + \
-                                    F.logsigmoid(pred_lm_real)).mean()
+        ''' w-GAN loss '''
+        self.loss['dis_lm_gan'] = (0.25*(pred_lm_fake_1 + pred_lm_fake_2 + pred_lm_fake_3 + pred_lm_fake_4) - pred_lm_real).mean()
         self.loss['dis_lm'] += self.loss['dis_lm_gan']
+
+        '''gradient-penalty loss '''
+        # TODO: double check here, fake use Ib', Pb
+        alpha = torch.rand(self.batch_size, 1, 1, 1).cuda()
+        x_lm_r = alpha * self.IBPb + (1 - alpha) * self.IaPa
+        pred_lm_r = self.discrim_lm(x_lm_r)
+        self.loss['dis_lm_gp'] = util.gradient_penalty(x_lm_r, pred_lm_r)
+        self.loss['dis_lm'] += 100. * self.loss['dis_lm_gp']
 
         return self.loss['dis_lm']
 
