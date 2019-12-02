@@ -190,7 +190,7 @@ class GrouppedAttrDataset(base_dataset.BaseDataset):
     '''
 
     def __init__(self, image_list, attributes, transform=forward_transform, scale=(128, 128), crop_size=(160, 160),
-                 bias=(0, 15), label_path='info/img_label.csv',
+                 bias=(0, 15),
                  csv_path='info/celeba-with-orientation.csv', csv_split=',', random_crop_bias=0):
         super(GrouppedAttrDataset, self).__init__()
         self.files = []
@@ -211,7 +211,6 @@ class GrouppedAttrDataset(base_dataset.BaseDataset):
         self.scale = scale
         self.bias = bias
         self.frame = pd.read_csv(csv_path, sep=csv_split)
-        # self.frame_label = pd.read_csv(label_path)
         self.orientation = pd.concat((self.frame['name'], self.frame['orientation']), axis=1)
         self.orientation = self.orientation.set_index('name').to_dict()['orientation']
         self.crop_size = crop_size
@@ -240,22 +239,13 @@ class GrouppedAttrDataset(base_dataset.BaseDataset):
             # log(attr_value)
             # log(attrs)
             f2[attrs] = attr_value
-        # pdb.set_trace()
-
         self.frame = f2
 
     def __getitem__(self, index):
         try:
             img = util.readRGB(self.files[index]).astype(np.float32)
+            image_name = os.path.basename(self.files[index])
 
-            # support img path with subfolder
-            image_name = self.files[index].split('/')
-            for i, char in enumerate(self.files[index].split('/')):
-                if char == 'img':
-                    del image_name[:i]
-                    image_name = '/'.join(image_name)
-            # image_name = os.path.basename(self.files[index])
-            # pdb.set_trace()
             orientation = self.orientation[image_name]
             if orientation == 'right':
                 img = cv2.flip(img, 1)
@@ -266,7 +256,7 @@ class GrouppedAttrDataset(base_dataset.BaseDataset):
 
             if self.crop_size[0] > 0:
                 # pad if crop_size larger than height or width
-                img = util.center_pad(img, self.crop_size)
+                # img = util.center_pad(img, self.crop_size)
                 if self.random_crop_bias > 0:
                     img = util.random_crop(img, self.crop_size, (self.random_crop_bias, self.random_crop_bias))
                 else:
@@ -279,9 +269,132 @@ class GrouppedAttrDataset(base_dataset.BaseDataset):
             attribute = self.frame[self.frame['name'] == image_name]
             attribute = attribute.values[0][1:]
             attribute = tuple(attribute)
-            label = 0
-            # label = self.frame_label[self.frame_label['file_name'] == image_name].get_value(1, 'label')
-            return img, attribute, label
+            return img, attribute
+        except:
+            rd_idx = np.random.randint(0, self.__len__())
+            return self.__getitem__(rd_idx)
+
+    def __len__(self):
+        return len(self.files)
+
+
+class GrouppedAttrLandmarkDataset(base_dataset.BaseDataset):
+    '''
+    the attribute is generated as [nparray[att1, att2], nparray[att3], nparray[att4]], where each inside list corresponds
+    to one branch.
+
+    the input also has the format like:
+    Moustache@No_Beard@Goatee,Smile,Young,Bangs
+    however, it does not treat the "@" as "or", but concate them.
+    '''
+
+    def __init__(self, image_list, attributes, transform=forward_transform, scale=(128, 128), crop_size=(160, 160),
+                 bias=(0, 15), img_dir_path='../img_align_celeba/', landmark_dir_path='../img_landmark/',
+                 csv_path='info/celeba-with-orientation.csv', csv_split=',', random_crop_bias=0,
+                 label_path='info/img_label.csv'):
+        super(GrouppedAttrLandmarkDataset, self).__init__()
+        self.files = []
+        supported_format = ['jpg', 'png', 'jpeg']
+        for image_now in image_list:  # filter out files that are not image
+            format = image_now.split('.')[-1]
+            format = format.lower()
+            is_image = False
+            for sf in supported_format:
+                if format == sf:
+                    is_image = True
+                    break
+            if is_image:
+                self.files += [image_now]
+
+        print('* Total Images: {}'.format(len(self.files)))
+        self.img_dir_path = img_dir_path
+        print(img_dir_path)
+        self.landmark_dir_path = landmark_dir_path
+        landmark_mean_path = os.path.join(landmark_dir_path, 'mean.jpg')
+        self.landmark_mean = util.readBW(landmark_mean_path).astype(np.float32)
+        self.transform = transform
+        self.scale = scale
+        self.bias = bias
+        self.frame = pd.read_csv(csv_path, sep=csv_split)
+        self.frame_label = pd.read_csv(label_path)
+        self.orientation = pd.concat((self.frame['name'], self.frame['orientation']), axis=1)
+        self.orientation = self.orientation.set_index('name').to_dict()['orientation']
+        self.crop_size = crop_size
+        self.random_crop_bias = random_crop_bias
+
+        # parse the "attribtues"
+        attributes = attributes.split(',')  # each ',' separates a branch.
+        f2 = self.frame['name'].to_frame()
+        f3 = self.frame.replace(-1, 0)
+
+        # import pdb
+        # pdb.set_trace()
+        for attrs in attributes:
+            attrs_split = attrs.split('@')  # '@' separates attributes inside each branch.`
+            for i, att in enumerate(attrs_split):
+                if att[0] == '#':
+                    col_now = ~f3[att[1:]]
+                else:
+                    col_now = f3[att]
+                if i == 0:
+                    attr_value = pd.DataFrame(col_now)
+                else:
+                    attr_value = pd.concat([attr_value, col_now], axis=1)
+            # frame_now = pd.DataFrame(atts,attr_value)
+            attr_value = list(attr_value.values.astype(np.float32))
+            # log(attr_value)
+            # log(attrs)
+            f2[attrs] = attr_value
+        self.frame = f2
+
+    def __getitem__(self, index):
+        try:
+            img_path = os.path.join(self.img_dir_path, self.files[index])
+            landmark_path = os.path.join(self.landmark_dir_path, self.files[index])
+            img = util.readRGB(img_path).astype(np.float32)
+            landmark = util.readBW(landmark_path).astype(np.float32)
+            landmark_diff = 255*((landmark + self.landmark_mean)>0)
+            landmark_ch3 = np.stack([landmark, self.landmark_mean, landmark_diff], axis=2)
+            image_name = os.path.basename(self.files[index])
+
+            orientation = self.orientation[image_name]
+            if orientation == 'right':
+                img = cv2.flip(img, 1)
+                # landmark = cv2.flip(landmark, 1)
+            elif orientation == 'left':
+                pass
+            else:
+                raise RuntimeError
+
+            if self.crop_size[0] > 0:
+                # pad if crop_size larger than height or width
+                # img = util.center_pad(img, self.crop_size)
+                if self.random_crop_bias > 0:
+                    print('wrong')
+                    raise ValueError('do not support random crop with face rotation')
+                    # img = util.random_crop(img, self.crop_size, (self.random_crop_bias, self.random_crop_bias))
+                else:
+                    img = util.center_crop(img, self.crop_size, self.bias)
+                    landmark_ch3 = util.center_crop(landmark_ch3, self.crop_size, self.bias)
+
+            if self.scale[0] > 0:
+                img = scipy.misc.imresize(img, [self.scale[0], self.scale[1]])
+                landmark_ch3 = scipy.misc.imresize(landmark_ch3, [self.scale[0], self.scale[1]])
+
+            img = self.transform(img)
+            # Pa, Pb, Pa+Pb
+            landmark_trans = self.transform(landmark_ch3)
+            # Pa, Pa, 0
+            landmark_same = torch.zeros_like(landmark_trans)
+            landmark_same[0,:,:] = landmark_trans[0,:,:]
+            landmark_same[1,:,:] = landmark_trans[0,:,:]
+
+            attribute = self.frame[self.frame['name'] == image_name]
+            attribute = attribute.values[0][1:]
+            attribute = tuple(attribute)
+            
+            label = self.frame_label[self.frame_label['file_name'] == image_name]['label'].item()
+            return img, attribute, int(label), landmark_trans, landmark_same
         except:
             rd_idx = np.random.randint(0, self.__len__())
             return self.__getitem__(rd_idx)

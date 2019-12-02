@@ -42,6 +42,25 @@ def writeTensor(save_path, tensor, nRow=16, row_first=False):
     imageio.imwrite(save_path, all)
 
 
+def writeTensor_2(save_path, tensor):
+    '''
+    use imageio to write the tensor
+    :param tensor: nImage x 3 or 1 x height x width
+    :param save_path: save path
+    '''
+    tensor = toTensor(tensor)
+    nSample = tensor.size()[0]
+    all = []
+    for i in range(nSample):
+        now = tensor[i, :, :, :]
+        now = now.permute(1, 2, 0)
+        all.append(now)
+    all = torch.cat(all, dim=0)
+    all = all.cpu().numpy().astype(np.uint8)
+    print('saving tensor to %s' % save_path)
+    imageio.imwrite(save_path, all)
+    
+
 def untransformTensor(vggImageTensor):
     '''
     untransform the tensor that is pre-normalized to fit the VGG network
