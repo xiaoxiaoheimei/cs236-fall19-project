@@ -15,7 +15,7 @@ from network import resnet50
 from network import model_face_rotate
 from data import attributeDataset
 from util.logger import logger
-from optimizer import optim_face_rotate
+from optimizer import optim_face_normalize
 
 # sys.setrecursionlimit(100000)
 log = logger(True)
@@ -30,11 +30,17 @@ def run():
     os.environ['CUDA_VISIBLE_DEVICES'] = '0,1,2'
 
     print('define dataset')
-    with open('info/celeba-train.txt', 'r') as f:
-        train_list = [tmp.rstrip() for tmp in f]
-    with open('info/celeba-test.txt', 'r') as f:
-        test_list = [tmp.rstrip() for tmp in f]
-    train_dataset = attributeDataset.GrouppedAttrLandmarkDataset(image_list=train_list, attributes=attr,
+    with open('info/celeba-train-normal.txt', 'r') as f:
+        train_normal_list = [tmp.rstrip() for tmp in f]
+    with open('info/celeba-train-tilt.txt', 'r') as f:
+        train_tilt_list = [tmp.rstrip() for tmp in f]
+    with open('info/celeba-test-normal.txt', 'r') as f:
+        test_normal_list = [tmp.rstrip() for tmp in f]
+    with open('info/celeba-test-tilt.txt', 'r') as f:
+        test_tilt_list = [tmp.rstrip() for tmp in f]
+    train_dataset = attributeDataset.GrouppedAttrLabelDataset(normal_list=train_normal_list,
+                                                         tilt_list=train_tilt_list,
+                                                         attributes=attr,
                                                          scale=(224, 224),
                                                          crop_size=(160, 160),
                                                          img_dir_path=img_dir,
@@ -42,7 +48,9 @@ def run():
                                                          csv_path='info/celeba-with-orientation.csv',
                                                          label_path='info/img_label.csv',
                                                          random_crop_bias=0)
-    test_dataset = attributeDataset.GrouppedAttrLandmarkDataset(image_list=test_list, attributes=attr,
+    test_dataset = attributeDataset.GrouppedAttrLabelDataset(normal_list=test_normal_list,
+                                                         tilt_list=test_tilt_list,
+                                                         attributes=attr,
                                                          scale=(224, 224),
                                                          crop_size=(160, 160),
                                                          img_dir_path=img_dir,
@@ -53,7 +61,7 @@ def run():
 
     print('define dataloader')
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0, drop_last=True)
-    test_dataloader = DataLoader(test_dataset, batch_size=20, shuffle=False, num_workers=0, drop_last=True)
+    test_dataloader = DataLoader(test_dataset, batch_size=32, shuffle=False, num_workers=0, drop_last=True)
 
     print('define model & optim')
     model = define_model()
@@ -102,22 +110,22 @@ def run():
 
 
 def define_optim(model):
-    optim = optim_face_rotate.optimizer(model)
+    optim = optim_face_normalize.optimizer(model)
     return optim
 
 
 def define_model():
     encoder = resnet50.Resnet50_ft()
-    decoder = model_face_rotate.decoder_face_rotate()
+    decoder = model_face_rotate.decoder_face_normalize()
     # discrim_real = discriminator(in_channels=3)
     # discrim_lm = discriminator(in_channels=4)
     discrim_real = model_face_rotate.discriminator(in_channels=3, wgan=False)
-    discrim_lm = model_face_rotate.discriminator(in_channels=4, wgan=False)
+    # discrim_lm = model_face_rotate.discriminator(in_channels=4, wgan=False)
     encoder = nn.DataParallel(encoder)
     decoder = nn.DataParallel(decoder)
     discrim_real = nn.DataParallel(discrim_real)
-    discrim_lm = nn.DataParallel(discrim_lm)
-    return encoder, decoder, discrim_real, discrim_lm
+    # discrim_lm = nn.DataParallel(discrim_lm)
+    return encoder, decoder, discrim_real
 
 
 if __name__ == '__main__':

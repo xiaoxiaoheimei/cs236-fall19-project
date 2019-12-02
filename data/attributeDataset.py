@@ -366,7 +366,7 @@ class GrouppedAttrLandmarkDataset(base_dataset.BaseDataset):
             orientation = self.orientation[image_name]
             if orientation == 'right':
                 img = cv2.flip(img, 1)
-                # landmark = cv2.flip(landmark, 1)
+                landmark = cv2.flip(landmark, 1)
             elif orientation == 'left':
                 pass
             else:
@@ -408,3 +408,131 @@ class GrouppedAttrLandmarkDataset(base_dataset.BaseDataset):
 
     def __len__(self):
         return len(self.files)
+
+class GrouppedAttrLabelDataset(base_dataset.BaseDataset):
+    '''
+    the attribute is generated as [nparray[att1, att2], nparray[att3], nparray[att4]], where each inside list corresponds
+    to one branch.
+
+    the input also has the format like:
+    Moustache@No_Beard@Goatee,Smile,Young,Bangs
+    however, it does not treat the "@" as "or", but concate them.
+    '''
+
+    def __init__(self, normal_list, tilt_list, attributes, transform=forward_transform, transform_lm=landmark_transform,
+                 scale=(128, 128), crop_size=(160, 160),
+                 bias=(0, 15), img_dir_path='../img_align_celeba/', landmark_dir_path='../img_landmark/',
+                 csv_path='info/celeba-with-orientation.csv', csv_split=',', random_crop_bias=0,
+                 label_path='info/img_label.csv'):
+        super(GrouppedAttrLabelDataset, self).__init__()
+        self.files_normal = normal_list
+        self.files_tilt = tilt_list
+        if len(self.files_normal) < len(self.files_tilt):
+            self.files_normal += self.files_normal[:len(self.files_tilt)-len(self.files_normal)]
+        else:
+            self.files_tilt += self.files_tilt[:-len(self.files_tilt)+len(self.files_normal)]
+        assert(len(self.files_normal)==len(self.files_tilt))
+
+        print('* Total Images: {}'.format(len(self.files_tilt)))
+        self.img_dir_path = img_dir_path
+        print(img_dir_path)
+        self.landmark_dir_path = landmark_dir_path
+        landmark_mean_path = os.path.join(landmark_dir_path, 'mean.jpg')
+        self.landmark_mean = util.readBW(landmark_mean_path).astype(np.float32)
+        self.transform = transform
+        self.transform_lm = transform_lm
+        self.scale = scale
+        self.bias = bias
+        self.frame = pd.read_csv(csv_path, sep=csv_split)
+        self.orientation = pd.concat((self.frame['name'], self.frame['orientation']), axis=1)
+        self.orientation = self.orientation.set_index('name').to_dict()['orientation']
+        self.crop_size = crop_size
+        self.random_crop_bias = random_crop_bias
+
+        # parse the "attribtues"
+        attributes = attributes.split(',')  # each ',' separates a branch.
+        f2 = self.frame['name'].to_frame()
+        f3 = self.frame.replace(-1, 0)
+
+        # import pdb
+        # pdb.set_trace()
+        for attrs in attributes:
+            attrs_split = attrs.split('@')  # '@' separates attributes inside each branch.`
+            for i, att in enumerate(attrs_split):
+                if att[0] == '#':
+                    col_now = ~f3[att[1:]]
+                else:
+                    col_now = f3[att]
+                if i == 0:
+                    attr_value = pd.DataFrame(col_now)
+                else:
+                    attr_value = pd.concat([attr_value, col_now], axis=1)
+            # frame_now = pd.DataFrame(atts,attr_value)
+            attr_value = list(attr_value.values.astype(np.float32))
+            # log(attr_value)
+            # log(attrs)
+            f2[attrs] = attr_value
+        self.frame = f2
+
+    def __getitem__(self, index):
+        try:
+            img_normal_path = os.path.join(self.img_dir_path, self.files_normal[index])
+            img_tilt_path = os.path.join(self.img_dir_path, self.files_tilt[index])
+            # landmark_path = os.path.join(self.landmark_dir_path, self.files[index])
+            img_normal = util.readRGB(img_normal_path).astype(np.float32)
+            img_tilt = util.readRGB(img_tilt_path).astype(np.float32)
+            # landmark = util.readBW(landmark_path).astype(np.float32)
+            # landmark_ch3 = np.stack([landmark, self.landmark_mean, np.zeros_like(self.landmark_mean)], axis=2)
+
+            image_normal_name = os.path.basename(self.files_normal[index])
+            image_tilt_name = os.path.basename(self.files_tilt[index])
+
+            orientation = self.orientation[image_tilt_name]
+            if orientation == 'right':
+                img_tilt = cv2.flip(img_tilt, 1)
+                # landmark = cv2.flip(landmark, 1)
+            elif orientation == 'left':
+                pass
+            else:
+                raise RuntimeError
+
+            if self.crop_size[0] > 0:
+                # pad if crop_size larger than height or width
+                if self.random_crop_bias > 0:
+                    print('wrong')
+                    raise ValueError('do not support random crop with face rotation')
+                    # img = util.random_crop(img, self.crop_size, (self.random_crop_bias, self.random_crop_bias))
+                else:
+                    img_normal = util.center_crop(img_normal, self.crop_size, self.bias)
+                    img_tilt = util.center_crop(img_tilt, self.crop_size, self.bias)
+                    # landmark_ch3 = util.center_crop(landmark_ch3, self.crop_size, self.bias)
+
+            if self.scale[0] > 0:
+                img_normal = scipy.misc.imresize(img_normal, [self.scale[0], self.scale[1]])
+                img_tilt = scipy.misc.imresize(img_tilt, [self.scale[0], self.scale[1]])
+                # print('after resize', img_normal.shape)
+                # landmark_ch3 = scipy.misc.imresize(landmark_ch3, [self.scale[0], self.scale[1]])
+
+            img_normal = self.transform(img_normal)
+            img_tilt = self.transform(img_tilt)
+            # print('after transform', img_normal.shape)
+            # # Pa, Pb, _
+            # landmark_trans = self.transform_lm(landmark_ch3)
+            # landmark_trans = landmark_trans[:2,:,:]
+            # # Pa, Pa, 0
+            # landmark_same = torch.zeros_like(landmark_trans)
+            # landmark_same[0,:,:] = landmark_trans[0,:,:]
+            # landmark_same[1,:,:] = landmark_trans[0,:,:]
+
+            # attribute = self.frame[self.frame['name'] == image_name]
+            # attribute = attribute.values[0][1:]
+            # attribute = tuple(attribute)
+
+            # label = self.frame_label[self.frame_label['file_name'] == image_name]['label'].item()
+            return img_normal, img_tilt
+        except:
+            rd_idx = np.random.randint(0, self.__len__())
+            return self.__getitem__(rd_idx)
+
+    def __len__(self):
+        return len(self.files_normal)
