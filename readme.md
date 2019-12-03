@@ -112,3 +112,14 @@ We have also provided a pretrained model [here](https://www.dropbox.com/sh/31dki
 # Contect
 
 Please contact [yingcong.ian.chen@gmail.com](mailto:yingcong.ian.chen@gmail.com) if you have any question or suggestion.
+
+#Custom Command (Liu)
+
+-Train with stacked decoder (better performance now):
+
+python run.py train --data_dir ../datasets/celeba-dataset/img_align_celeba/img_align_celeba/ --stack_type s0 -gpu 0,1
+
+-Train with standalone decoder:
+
+python run.py train --data_dir ../datasets/celeba-dataset/img_align_celeba/img_align_celeba/ --stack_type s1 -gpu 0,1
+

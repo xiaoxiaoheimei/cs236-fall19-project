@@ -12,6 +12,7 @@ from util import util
 from torch.utils import model_zoo
 from util import opt
 from util.logger import logger
+import pdb
 
 log = logger(True)
 
@@ -282,9 +283,10 @@ class VGG(nn.Module, BaseModel):
             else:
                 print('loading VGG from %s' % local_model_path)
                 state_dict = torch.load(local_model_path)
+            #pdb.set_trace()
             model_dict = self.state_dict()
             state_dict = {key: value for key, value in state_dict.items() if key in model_dict}
-            # print(state_dict.keys())
+            #print(state_dict.keys())
             self.load_state_dict(state_dict)
 
     def forward(self, x):
