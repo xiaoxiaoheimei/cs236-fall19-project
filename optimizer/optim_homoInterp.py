@@ -39,12 +39,14 @@ class optimizer(base_optimizer):
         self.opt.n_discrim = 5
 
     def set_input(self, input):
-        self.image, self.attribute = input
+        self.image, self.attribute, _, self.landmark = input
         self.image = util.toVariable(self.image).cuda()
         self.attribute = [util.toVariable(att.cuda()) for att in self.attribute]
+        self.landmark = util.toVariable(self.landmark).cuda()
 
     def zero_grad(self):
         self.encoder.zero_grad()
+        self.encoder_landmark.zero_grad()
         self.interp_net.zero_grad()
         self.decoder.zero_grad()
         self.discrim.zero_grad()
@@ -56,8 +58,9 @@ class optimizer(base_optimizer):
         self.KGTransform = nn.DataParallel(nn.Conv2d(512, 512, 1)).cuda()
 
     def _get_model(self, model):
-        encoder, interp_net, decoder, discrim, discrim_identity = model
+        encoder, encoder_landmark, interp_net, decoder, discrim, discrim_identity = model
         self.encoder = encoder.cuda()
+        self.encoder_landmark = encoder_landmark.cuda()
         self.interp_net = interp_net.cuda()
         self.decoder = decoder.cuda()
         self.discrim = discrim.cuda()
@@ -75,6 +78,7 @@ class optimizer(base_optimizer):
 
     def _define_optim(self):
         self.optim_encoder = torch.optim.Adam(self.encoder.parameters(), lr=1e-4, betas=[0.5, 0.999])
+        self.optim_encoder_landmark = torch.optim.Adam(self.encoder_landmark.parameters(), lr=1e-4, betas=[0.5, 0.999])
         self.optim_interp = torch.optim.Adam(self.interp_net.parameters(), lr=1e-4, betas=[0.5, 0.999])
         self.optim_decoder = torch.optim.Adam(self.decoder.parameters(), lr=1e-4)
         self.optim_discrim = torch.optim.Adam(self.discrim.parameters(), lr=1e-4, betas=[0.5, 0.999])
@@ -83,6 +87,7 @@ class optimizer(base_optimizer):
     def load(self, label='latest'):
         save_dir = self.opt.save_dir + '/{}-{}.pth'
         self._check_and_load(self.encoder, save_dir.format('encoder', label))
+        self._check_and_load(self.encoder_landmark, save_dir.format('encoder_landmark', label))
         self._check_and_load(self.interp_net, save_dir.format('interp_net', label))
         self._check_and_load(self.decoder, save_dir.format('decoder', label))
         self._check_and_load(self.discrim, save_dir.format('discrim', label))
@@ -95,6 +100,7 @@ class optimizer(base_optimizer):
     def save(self, label='latest'):
         save_dir = self.opt.save_dir + '/{}-{}.pth'
         torch.save(self.encoder.state_dict(), save_dir.format('encoder', label))
+        torch.save(self.encoder_landmark.state_dict(), save_dir.format('encoder_landmark', label))
         torch.save(self.interp_net.state_dict(), save_dir.format('interp_net', label))
         torch.save(self.decoder.state_dict(), save_dir.format('decoder', label))
         torch.save(self.discrim.state_dict(), save_dir.format('discrim', label))
@@ -102,6 +108,7 @@ class optimizer(base_optimizer):
 
     def optimize_parameters(self, global_step):
         self.encoder.train()
+        self.encoder_landmark.train()
         self.interp_net.train()
         self.discrim.train()
         self.decoder.train()
@@ -112,6 +119,7 @@ class optimizer(base_optimizer):
         self.v = util.toVariable(self.generate_select_vector()).cuda()
         self.rand_idx = torch.randperm(self.image.size(0)).cuda()
         self.image_permute = self.image[self.rand_idx]
+        self.landmark_permute = self.landmark[self.rand_idx]
         self.attr_permute = []
         for att in self.attribute:
             self.attr_permute += [att[self.rand_idx]]
@@ -121,8 +129,11 @@ class optimizer(base_optimizer):
             self.attr_interp += [att + self.v[:, i:i + 1] * (attp - att)]
         ''' pre-computed variables '''
         self.feat = self.encoder(self.image)
+        self.feat_lm1 = self.encoder_landmark(self.landmark)
+        # TODO
         self.feat_permute = self.feat[self.rand_idx]
-        self.feat_interp = self.interp_net(self.feat, self.feat_permute, self.v)
+        self.feat_lm2 = self.feat_lm1[self.rand_idx]
+        self.feat_interp = self.interp_net(self.feat, self.feat_permute, self.feat_lm1, self.feat_lm2, self.v)
 
         self.zero_grad()
         self.compute_dec_loss().backward(retain_graph=True)
@@ -151,21 +162,21 @@ class optimizer(base_optimizer):
         self.loss['dec_mse'] = nn.MSELoss()(im_out, self.image.detach())
         self.loss['dec'] += self.loss['dec_mse']
         ''' identity feature similarity between input image and interpt image '''
-        im_interp = self.decoder(self.feat_interp)
-        _, id_feat_input, _ = self.discrim_identity(F.interpolate(self.image.detach(),size=(224,224)))
-        _, id_feat_interp, _ = self.discrim_identity(F.interpolate(im_interp,size=(224,224)))
-        self.loss['dec_id'] = 1 - nn.CosineSimilarity(dim=1)(255.*id_feat_input, 255.*id_feat_interp).mean()
-        self.loss['dec'] += self.loss['dec_id']
+        # im_interp = self.decoder(self.feat_interp)
+        # _, id_feat_input, _ = self.discrim_identity(F.interpolate(self.image.detach(),size=(224,224)))
+        # _, id_feat_interp, _ = self.discrim_identity(F.interpolate(im_interp,size=(224,224)))
+        # self.loss['dec_id'] = 1 - nn.CosineSimilarity(dim=1)(255.*id_feat_input, 255.*id_feat_interp).mean()
+        # self.loss['dec'] += self.loss['dec_id']
         return self.loss['dec']
 
     def compute_discrim_loss(self):
         self.loss['discrim'] = 0
-        discrim_real, real_attr = self.discrim(self.feat.detach())
-        discrim_interp, interp_attr = self.discrim(self.feat_interp.detach())
+        discrim_real, real_attr = self.discrim(self.feat.detach(), self.feat_lm1.detach())
+        discrim_interp, interp_attr = self.discrim(self.feat_interp.detach(), self.feat_lm1.detach())
         ''' gradient penality '''
         gp_interpolate = self.random_interpolate(self.feat.data, self.feat_interp.data)
         gp_interpolate = util.toVariable(gp_interpolate, requires_grad=True)
-        discrim_gp_interpolated, _ = self.discrim(gp_interpolate)
+        discrim_gp_interpolated, _ = self.discrim(gp_interpolate, self.feat_lm1)
         self.loss['discrim_gp'] = util.gradient_penalty(gp_interpolate, discrim_gp_interpolated) * 100.
         self.loss['discrim'] += self.loss['discrim_gp']
         ''' the GAN loss '''
@@ -186,7 +197,7 @@ class optimizer(base_optimizer):
     def compute_enc_int_loss(self):
         self.loss['enc_int'] = 0
         # discrim_real, out_attr = self.discrim(self.feat)
-        discrim_interp, interp_attr = self.discrim(self.feat_interp)
+        discrim_interp, interp_attr = self.discrim(self.feat_interp, self.feat_lm1)
         ''' GAN loss '''
         self.loss['enc_int_gan'] = -discrim_interp.mean()
         self.loss['enc_int'] += self.loss['enc_int_gan']
@@ -196,6 +207,7 @@ class optimizer(base_optimizer):
         self.loss['enc_int'] += self.loss['enc_int_cls']
         ''' interp all loss '''
         feat_interp_all = self.interp_net(self.feat.detach(), self.feat_permute.detach(),
+                                            self.feat_lm1.detach(), self.feat_lm2.detach(),
                                           self.generate_select_vector(type='select_all'))
         self.loss['enc_int_all'] = nn.MSELoss()(feat_interp_all, self.feat_permute.detach())
         self.loss['enc_int'] += self.loss['enc_int_all']
@@ -219,7 +231,7 @@ class optimizer(base_optimizer):
     def get_current_errors(self):
         return self.loss
 
-    def interp_test(self, img1, img2):
+    def interp_test(self, img1, img2, landmark1, landmark2):
         '''
         testing the interpolation effect.
         :param type: "single" and "accumulate"
@@ -229,6 +241,10 @@ class optimizer(base_optimizer):
         img2 = img2.unsqueeze(0)
         feat1 = self.encoder(img1)
         feat2 = self.encoder(img2)
+        landmark1 = landmark1.unsqueeze(0)
+        landmark2 = landmark2.unsqueeze(0)
+        feat_lm1 = self.encoder_landmark(landmark1)
+        feat_lm2 = self.encoder_landmark(landmark2)
         result_map = []
         n_branches = self.interp_net.module.n_branch
         for attr_idx in range(n_branches):
@@ -237,7 +253,7 @@ class optimizer(base_optimizer):
                 attr_vec = torch.zeros(1, n_branches + 1)
                 attr_vec[:, attr_idx] = strength
                 attr_vec = util.toVariable(attr_vec).cuda()
-                interp_feat = self.interp_net(feat1, feat2, attr_vec)
+                interp_feat = self.interp_net(feat1, feat2, feat_lm1, feat_lm2,attr_vec)
                 out_tmp = self.decoder(interp_feat)
                 result_row += [out_tmp.data.cpu()]
             result_row += [img2.data.cpu()]
@@ -248,7 +264,7 @@ class optimizer(base_optimizer):
         for strength in [0, 0.5, 1]:
             attr_vec = torch.ones(1, n_branches) * strength
             attr_vec = util.toVariable(attr_vec).cuda()
-            interp_feat = self.interp_net(feat1, feat2, attr_vec)
+            interp_feat = self.interp_net(feat1, feat2, feat_lm1, feat_lm2,attr_vec)
             out_tmp = self.decoder(interp_feat)
             result_row += [out_tmp.data.cpu()]
         result_row += [img2.data.cpu()]
@@ -260,6 +276,7 @@ class optimizer(base_optimizer):
 
     def save_samples(self, global_step=0):
         self.encoder.eval()
+        self.encoder_landmark.eval()
         self.interp_net.eval()
         self.discrim.eval()
         self.decoder.eval()
@@ -270,11 +287,13 @@ class optimizer(base_optimizer):
         map_single = []
         n_branches = self.interp_net.module.n_branch
         for i in range(n_pairs):
-            img1, _ = self.test_dataset[i]
-            img2, _ = self.test_dataset[i + 1]
+            img1, _, _, landmark1 = self.test_dataset[i]
+            img2, _, _, landmark2 = self.test_dataset[i + 1]
             img1 = util.toVariable(img1).cuda()
             img2 = util.toVariable(img2).cuda()
-            map_single += [self.interp_test(img1, img2)]
+            landmark1 = util.toVariable(landmark1).cuda()
+            landmark2 = util.toVariable(landmark2).cuda()
+            map_single += [self.interp_test(img1, img2, landmark1, landmark2)]
         map_single = torch.cat(map_single, dim=0)
         map_single = vs.untransformTensor(map_single)
         vs.writeTensor(os.path.join(save_path_single, '%d.jpg' % global_step), map_single, nRow=2)
@@ -284,7 +303,7 @@ class optimizer(base_optimizer):
         im_out = [self.image.data.cpu()]
         v = torch.zeros(self.image.size(0), n_branches)
         v = util.toVariable(v).cuda()
-        feat = self.interp_net(self.feat, self.feat_permute, v)
+        feat = self.interp_net(self.feat, self.feat_permute, self.feat_lm1, self.feat_lm2, v)
         out_now = self.decoder(feat)
         im_out += [out_now.data.cpu()]
         for i in range(n_branches):
@@ -292,7 +311,7 @@ class optimizer(base_optimizer):
             v = torch.zeros(self.image.size(0), n_branches)
             v[:, 0:i + 1] = 1
             v = util.toVariable(v).cuda()
-            feat = self.interp_net(self.feat.detach(), self.feat_permute.detach(), v)
+            feat = self.interp_net(self.feat.detach(), self.feat_permute.detach(), self.feat_lm1, self.feat_lm2, v)
             out_now = self.decoder(feat.detach())
             im_out += [out_now.data.cpu()]
         im_out += [self.image_permute.data.cpu()]

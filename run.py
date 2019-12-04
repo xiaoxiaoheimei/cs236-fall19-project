@@ -68,8 +68,9 @@ class Engine(object):
 
     def define_model(self):
         encoder = model.encoder()
+        encoder_landmark = model.encoder_landmark()
         n_branch = len(self.args.attr.split(','))
-        interp = model.interp_net(
+        interp = model.interp_net_landmark(
             n_branch=n_branch + 1)  # +1 because it needs at least one residual branch to model other attributes
         if self.args.dec_type == 'v1':
             decoder = model.decoder()
@@ -77,15 +78,16 @@ class Engine(object):
             decoder = model.decoder2()
         else:
             raise NotImplementedError
-        discrim = model.discrim(self.args.attr)
+        discrim = model.discrim_landmark(self.args.attr)
         discrim_identity = resnet50.Resnet50_ft()
         encoder = nn.DataParallel(encoder)
+        encoder_landmark = nn.DataParallel(encoder_landmark)
         decoder = nn.DataParallel(decoder)
         interp = nn.DataParallel(interp)
         discrim_identity = nn.DataParallel(discrim_identity)
         # discrim = nn.DataParallel(discrim)
 
-        return encoder, interp, decoder, discrim, discrim_identity
+        return encoder, encoder_landmark, interp, decoder, discrim, discrim_identity
 
     def define_optim(self, model):
         optim = optim_homoInterp.optimizer(model, self.args)
@@ -93,13 +95,19 @@ class Engine(object):
 
     def load_dataset(self):
         with open('info/celeba-train.txt', 'r') as f:
-            train_list = [os.path.join(self.args.data_dir, tmp.rstrip()) for tmp in f]
+            # train_list = [os.path.join(self.args.data_dir, tmp.rstrip()) for tmp in f]
+            train_list = [tmp.rstrip() for tmp in f]
         with open('info/celeba-test.txt', 'r') as f:
-            test_list = [os.path.join(self.args.data_dir, tmp.rstrip()) for tmp in f]
-        train_dataset = attributeDataset.GrouppedAttrDataset(image_list=train_list, attributes=self.args.attr,
+            # test_list = [os.path.join(self.args.data_dir, tmp.rstrip()) for tmp in f]
+            test_list = [tmp.rstrip() for tmp in f]
+        train_dataset = attributeDataset.GrouppedAttrLandmarkDataset(image_list=train_list, attributes=self.args.attr,
+                                                             img_dir_path='../cerebA/img_align_celeba/',
+                                                             landmark_dir_path='../cerebA/img_landmark/',
                                                              csv_path='info/celeba-with-orientation.csv',
                                                              random_crop_bias=self.args.random_crop_bias)
-        test_dataset = attributeDataset.GrouppedAttrDataset(image_list=test_list, attributes=self.args.attr,
+        test_dataset = attributeDataset.GrouppedAttrLandmarkDataset(image_list=test_list, attributes=self.args.attr,
+                                                            img_dir_path='../cerebA/img_align_celeba/',
+                                                            landmark_dir_path='../cerebA/img_landmark/',
                                                             csv_path='info/celeba-with-orientation.csv')
         return train_dataset, test_dataset
 

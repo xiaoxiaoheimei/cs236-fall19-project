@@ -17,6 +17,26 @@ class encoder(nn.Module):
         y = y[-1]
         return y
 
+class encoder_landmark(nn.Module):
+    def __init__(self):
+        super(encoder_landmark, self).__init__()
+        self.model = nn.Sequential(*[
+            nn.Conv2d(1, 16, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(16),
+            nn.ReLU(),
+            nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU()])
+
+    def forward(self, x):
+        y = self.model(x)
+        return y
 
 class _interp_branch(nn.Module):
     '''
@@ -64,6 +84,52 @@ class interp_net(nn.Module):
         z = feat1 + sum(z)
         return z
 
+class _interp_branch_landmark(nn.Module):
+    '''
+    one branch of the interpolator network
+    '''
+
+    def __init__(self, in_channels, out_channels):
+        super(_interp_branch_landmark, self).__init__()
+        self.model = nn.Sequential(nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
+                                   nn.ReLU(True),
+                                   # nn.LeakyReLU(1e-1, True),
+                                   nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
+                                   nn.ReLU(True),
+                                   # nn.LeakyReLU(1e-1, True),
+                                   nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1))
+
+    def forward(self, x):
+        return self.model(x)
+
+
+class interp_net_landmark(nn.Module):
+    def __init__(self, n_branch, channels=512, lm_channels=64):
+        '''
+        the multi-branch interpolator network
+        :param channels: channels of the latent space.
+        :param n_branch: number of branches. each branch deals with an attribtue
+        '''
+        super(interp_net_landmark, self).__init__()
+        self.n_branch = n_branch
+        branch = []
+        branch_fn = _interp_branch_landmark
+        for i in range(n_branch):
+            branch += [branch_fn(channels+lm_channels, channels)]
+        self.branch = nn.ModuleList(branch)
+
+    def forward(self, feat1, feat2, feat_lm1, feat_lm2, selective_vector, **kwargs):
+        y = feat2 - feat1
+        y_lm = torch.cat([y, feat_lm1], dim=1)
+        selective_tensor = selective_vector.unsqueeze(2).unsqueeze(3)
+        selective_tensor = selective_tensor.expand((-1, -1, y.size(2), y.size(3)))
+        z = []
+        for i in range(self.n_branch):
+            tmp = self.branch[i](y_lm)
+            tmp = tmp * selective_tensor[:, i:i + 1, :, :]
+            z += [tmp]
+        z = feat1 + sum(z)
+        return z
 
 class decoder(nn.Module):
     def __init__(self, upsample_mode='nearest', pretrained=True):
@@ -168,6 +234,53 @@ class discrim(nn.Module):
             attributes += [attribute_now]
         return ifReal, attributes
 
+class discrim_landmark(nn.Module):
+    '''
+    attr is the input attribute list that is consistent with data/attreibuteDataset/Dataset_attr_merged_v2,
+    e.g., Moustache@#No_Beard@Goatee,Smile,Young,Bangs
+    '''
+
+    def __init__(self, attr, in_channels=512, lm_channels=64):
+        super(discrim_landmark, self).__init__()
+        self.model = nn.Sequential(
+            nn.Conv2d(in_channels+lm_channels, 256, 1),
+            nn.InstanceNorm2d(256, affine=True),
+            nn.LeakyReLU(0.2, True),
+            nn.Conv2d(256, 256, 4, padding=1, stride=2),
+            nn.InstanceNorm2d(256, affine=True),
+            nn.LeakyReLU(0.2, True),
+            nn.Conv2d(256, 256, 4, padding=1, stride=2),
+            nn.InstanceNorm2d(256, affine=True),
+            nn.LeakyReLU(0.2, True),
+            nn.Conv2d(256, 256, 2)
+        )
+        # self.model = nn.Sequential(
+        #     nn.Conv2d(512, 256, 1),
+        #     nn.ReLU(True),
+        #     nn.Conv2d(256, 256, 14),
+        # )
+        self.ifReal = nn.Conv2d(256, 256, 1)
+        # self.attribute = nn.Conv2d(256, n_attributes, 1)
+        attr_branches = []
+        attr = attr.split(',')
+        for i in range(len(attr)):
+            attr_now = attr[i].split('@')
+            branch_now = nn.Conv2d(256, len(attr_now), 1)
+            attr_branches += [branch_now]
+        attr_branches = nn.ModuleList(attr_branches)
+        self.attr_branches = attr_branches
+        self.model = self.model
+        self.ifReal = self.ifReal
+
+    def forward(self, x, lm):
+        feat = torch.cat([x, lm], dim=1)
+        y = self.model(feat)
+        ifReal = self.ifReal(y)
+        attributes = []
+        for branch_now in self.attr_branches:
+            attribute_now = branch_now(y).squeeze(2).squeeze(2)
+            attributes += [attribute_now]
+        return ifReal, attributes
 
 class decoder2(nn.Module):
 

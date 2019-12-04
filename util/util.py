@@ -145,6 +145,10 @@ def readRGB(url):
     # img = img[:, :, :3]
     return img[:, :, [2, 1, 0]]
 
+def readBW(url):
+    img = cv2.imread(url, cv2.IMREAD_GRAYSCALE)
+    return img
+
 
 def str2bool(v):
     '''
