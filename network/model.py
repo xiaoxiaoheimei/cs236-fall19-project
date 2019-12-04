@@ -26,11 +26,11 @@ class encoder_stacked(nn.Module):
         model structure of the stacked GAN, use PReLU to keep negative value in latent space.
         '''
         self.model = nn.Sequential(nn.Conv2d(in_channels, in_channels//2, kernel_size=3, padding=1), 
-                                   nn.BatchNorm2d(in_channels//2), 
+                                   #nn.BatchNorm2d(in_channels//2), 
                                    nn.ReLU(), 
                                    nn.MaxPool2d(2, 2), 
                                    nn.Conv2d(in_channels//2, in_channels//2, kernel_size=3, padding=1),
-                                   nn.BatchNorm2d(in_channels//2),
+                                   #nn.BatchNorm2d(in_channels//2),
                                    nn.ReLU(),
                                    nn.Conv2d(in_channels//2, out_channels, 1),
                                    nn.ReLU()

@@ -20,7 +20,7 @@ log = logger.logger()
 
 class optimizer(base_optimizer):
 
-    def __init__(self, model, option=opt.opt(), lw=[1.0, 10.0]):
+    def __init__(self, model, option=opt.opt(), lw=[1.0, 1.0]):
         super(optimizer, self).__init__()
         self._default_opt()
         self.opt.merge_opt(option)
