@@ -4,6 +4,7 @@ the trainer for the homomorphic interpolation model
 from __future__ import print_function
 import torch
 from torch import nn
+import torch.nn.functional as F
 from optimizer.base_optimizer import base_optimizer
 from network import base_network
 from network.loss import classification_loss_list, perceptural_loss
@@ -28,6 +29,7 @@ class optimizer(base_optimizer):
         # self.writer = curves.writer(log_dir=self.opt.save_dir + '/log')
         util.mkdir(self.opt.save_dir+'/log')
         self.writer = tensorboardX.SummaryWriter(log_dir=self.opt.save_dir + '/log')
+        self.load_pretrained(weights_path='checkpoints/resnet50_face/resnet50_ft_dims_2048.pth')
         if self.opt.continue_train:
             self.load()
 
@@ -54,11 +56,12 @@ class optimizer(base_optimizer):
         self.KGTransform = nn.DataParallel(nn.Conv2d(512, 512, 1)).cuda()
 
     def _get_model(self, model):
-        encoder, interp_net, decoder, discrim = model
+        encoder, interp_net, decoder, discrim, discrim_identity = model
         self.encoder = encoder.cuda()
         self.interp_net = interp_net.cuda()
         self.decoder = decoder.cuda()
         self.discrim = discrim.cuda()
+        self.discrim_identity = discrim_identity.cuda()
         with open(self.opt.save_dir + '/encoder.txt', 'w') as f:
             print(encoder, file=f)
         with open(self.opt.save_dir + '/interp_net.txt', 'w') as f:
@@ -67,6 +70,8 @@ class optimizer(base_optimizer):
             print(decoder, file=f)
         with open(self.opt.save_dir + '/discrim.txt', 'w') as f:
             print(discrim, file=f)
+        with open(self.opt.save_dir + '/discrim_identity.txt', 'w') as f:
+            print(discrim_identity, file=f)
 
     def _define_optim(self):
         self.optim_encoder = torch.optim.Adam(self.encoder.parameters(), lr=1e-4, betas=[0.5, 0.999])
@@ -83,6 +88,10 @@ class optimizer(base_optimizer):
         self._check_and_load(self.discrim, save_dir.format('discrim', label))
         self._check_and_load(self.KGTransform, save_dir.format('KGTransform', label))
 
+    def load_pretrained(self, weights_path='checkpoints/resnet50_face/resnet50_ft_dims_2048.pth'):
+        state_dict = torch.load(weights_path)
+        self.discrim_identity.load_state_dict(state_dict, strict=False)
+
     def save(self, label='latest'):
         save_dir = self.opt.save_dir + '/{}-{}.pth'
         torch.save(self.encoder.state_dict(), save_dir.format('encoder', label))
@@ -97,6 +106,7 @@ class optimizer(base_optimizer):
         self.discrim.train()
         self.decoder.train()
         self.KGTransform.train()
+        self.discrim_identity.eval()
         self.loss = OrderedDict()
         ''' define v '''
         self.v = util.toVariable(self.generate_select_vector()).cuda()
@@ -134,11 +144,18 @@ class optimizer(base_optimizer):
 
     def compute_dec_loss(self):
         self.loss['dec'] = 0
+        ''' similarity between input image and output image (its own features) '''
         im_out = self.decoder(self.feat)
         self.loss['dec_per'] = self.perceptural_loss(im_out, self.image)
         self.loss['dec'] += self.loss['dec_per']
         self.loss['dec_mse'] = nn.MSELoss()(im_out, self.image.detach())
         self.loss['dec'] += self.loss['dec_mse']
+        ''' identity feature similarity between input image and interpt image '''
+        im_interp = self.decoder(self.feat_interp)
+        _, id_feat_input, _ = self.discrim_identity(F.interpolate(self.image.detach(),size=(224,224)))
+        _, id_feat_interp, _ = self.discrim_identity(F.interpolate(im_interp,size=(224,224)))
+        self.loss['dec_id'] = 1 - nn.CosineSimilarity(dim=1)(255.*id_feat_input, 255.*id_feat_interp).mean()
+        self.loss['dec'] += self.loss['dec_id']
         return self.loss['dec']
 
     def compute_discrim_loss(self):
@@ -246,6 +263,7 @@ class optimizer(base_optimizer):
         self.interp_net.eval()
         self.discrim.eval()
         self.decoder.eval()
+        self.discrim_identity.eval()
         n_pairs = 20
         save_path_single = os.path.join(self.opt.save_dir, 'samples/single')
         util.mkdir(save_path_single)

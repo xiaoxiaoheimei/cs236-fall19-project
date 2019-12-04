@@ -147,7 +147,7 @@ def readRGB(url):
 
 
 def str2bool(v):
-    ''' 
+    '''
     example:
     parser.add_argument('--sth', default='true', type=str2bool)
     '''
@@ -246,7 +246,7 @@ def center_crop(img, target_size, bias=(0,0)):
     return img2
 
 def random_crop(img, target_size, random_range):
-    ''' 
+    '''
     randomly choose the bias of center cropping
     '''
     bias_x = np.random.randint(random_range[0]*2+1) - random_range[0]

@@ -16,7 +16,7 @@ log = logger(True)
 
 
 class TrainEngine(object):
-    def __init__(self, dataset, optimizer, batch_size, data_adapter=None, num_workers=8, recover_step_epoch=True):
+    def __init__(self, dataset, optimizer, batch_size, data_adapter=None, num_workers=0, recover_step_epoch=True):
         super(TrainEngine, self).__init__()
         self.dataset = dataset
         self.dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers,
@@ -66,5 +66,3 @@ class TrainEngine(object):
             # self.optimizer.save(e)
             self.optimizer.add_summary_heavy(e)
         self.optimizer.save()
-
-

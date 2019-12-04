@@ -5,6 +5,7 @@ import argparse
 import os
 from data import attributeDataset
 from util import util
+from network import resnet50
 from torch.utils.data import DataLoader
 from util import tensorWriter
 import torch
@@ -77,12 +78,14 @@ class Engine(object):
         else:
             raise NotImplementedError
         discrim = model.discrim(self.args.attr)
+        discrim_identity = resnet50.Resnet50_ft()
         encoder = nn.DataParallel(encoder)
         decoder = nn.DataParallel(decoder)
         interp = nn.DataParallel(interp)
+        discrim_identity = nn.DataParallel(discrim_identity)
         # discrim = nn.DataParallel(discrim)
 
-        return encoder, interp, decoder, discrim
+        return encoder, interp, decoder, discrim, discrim_identity
 
     def define_optim(self, model):
         optim = optim_homoInterp.optimizer(model, self.args)
@@ -94,7 +97,7 @@ class Engine(object):
         with open('info/celeba-test.txt', 'r') as f:
             test_list = [os.path.join(self.args.data_dir, tmp.rstrip()) for tmp in f]
         train_dataset = attributeDataset.GrouppedAttrDataset(image_list=train_list, attributes=self.args.attr,
-                                                             csv_path='info/celeba-with-orientation.csv', 
+                                                             csv_path='info/celeba-with-orientation.csv',
                                                              random_crop_bias=self.args.random_crop_bias)
         test_dataset = attributeDataset.GrouppedAttrDataset(image_list=test_list, attributes=self.args.attr,
                                                             csv_path='info/celeba-with-orientation.csv')
