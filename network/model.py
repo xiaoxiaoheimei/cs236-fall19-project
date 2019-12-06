@@ -347,13 +347,14 @@ class Vgg_recon_noskip(nn.Module):
 
 class model_deploy_container(nn.Module):
 
-    def __init__(self, encoder, interp_net, decoder):
+    def __init__(self, encoder, encoder_landmark, interp_net, decoder):
         super(model_deploy_container, self).__init__()
         self.encoder = encoder
+        self.encoder_landmark = encoder_landmark
         self.interp_net = interp_net
         self.decoder = decoder
 
-    def forward(self, x1, x2, v):
+    def forward(self, x1, x2, lm1, lm2, v):
         '''
         :param x1: the testing image
         :param x2: the reference image
@@ -361,7 +362,8 @@ class model_deploy_container(nn.Module):
         :return: the output image
         '''
         f1, f2 = self.encoder(x1), self.encoder(x2)
-        fout = self.interp_net(f1, f2, v)
+        f_lm1, f_lm2 = self.encoder_landmark(lm1), self.encoder_landmark(lm2)
+        fout = self.interp_net(f1, f2, f_lm1, f_lm2, v)
         xout = self.decoder(fout)
         return xout
 
@@ -372,12 +374,15 @@ class model_deploy(model_deploy_container):
     def __init__(self, n_branch, model_path, label='latest', parallel=False):
         nn.Module.__init__(self)
         self.encoder = encoder()
-        self.interp_net = interp_net(n_branch)
+        self.encoder_landmark = encoder_landmark()
+        self.interp_net = interp_net_landmark(n_branch)
         self.decoder = decoder(pretrained=False)
         self.encoder = nn.DataParallel(self.encoder)
+        self.encoder_landmark = nn.DataParallel(self.encoder_landmark)
         self.interp_net = nn.DataParallel(self.interp_net)
         self.decoder = nn.DataParallel(self.decoder)
 
         self.encoder.load_state_dict(torch.load('{}/encoder-{}.pth'.format(model_path, label)))
+        self.encoder_landmark.load_state_dict(torch.load('{}/encoder_landmark-{}.pth'.format(model_path, label)))
         self.interp_net.load_state_dict(torch.load('{}/interp_net-{}.pth'.format(model_path, label)))
         self.decoder.load_state_dict(torch.load('{}/decoder-{}.pth'.format(model_path, label)))

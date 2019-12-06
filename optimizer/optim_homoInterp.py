@@ -67,6 +67,8 @@ class optimizer(base_optimizer):
         self.discrim_identity = discrim_identity.cuda()
         with open(self.opt.save_dir + '/encoder.txt', 'w') as f:
             print(encoder, file=f)
+        with open(self.opt.save_dir + '/encoder_landmark.txt', 'w') as f:
+            print(encoder_landmark, file=f)
         with open(self.opt.save_dir + '/interp_net.txt', 'w') as f:
             print(interp_net, file=f)
         with open(self.opt.save_dir + '/decoder.txt', 'w') as f:
@@ -162,11 +164,11 @@ class optimizer(base_optimizer):
         self.loss['dec_mse'] = nn.MSELoss()(im_out, self.image.detach())
         self.loss['dec'] += self.loss['dec_mse']
         ''' identity feature similarity between input image and interpt image '''
-        # im_interp = self.decoder(self.feat_interp)
-        # _, id_feat_input, _ = self.discrim_identity(F.interpolate(self.image.detach(),size=(224,224)))
-        # _, id_feat_interp, _ = self.discrim_identity(F.interpolate(im_interp,size=(224,224)))
-        # self.loss['dec_id'] = 1 - nn.CosineSimilarity(dim=1)(255.*id_feat_input, 255.*id_feat_interp).mean()
-        # self.loss['dec'] += self.loss['dec_id']
+        im_interp = self.decoder(self.feat_interp)
+        _, id_feat_input, _ = self.discrim_identity(F.interpolate(self.image.detach(),size=(224,224)))
+        _, id_feat_interp, _ = self.discrim_identity(F.interpolate(im_interp,size=(224,224)))
+        self.loss['dec_id'] = 1 - nn.CosineSimilarity(dim=1)(255.*id_feat_input, 255.*id_feat_interp).mean()
+        self.loss['dec'] += self.loss['dec_id']
         return self.loss['dec']
 
     def compute_discrim_loss(self):
