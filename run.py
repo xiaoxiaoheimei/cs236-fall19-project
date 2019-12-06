@@ -177,7 +177,7 @@ class Engine(object):
         tensorWriter.writeTensor('{}/reference.jpg'.format(self.args.save_dir), img_out, nRow=1)
 
         for i, data in enumerate(loader):
-            img, _ = data
+            img, _, _, lm  = data
             img = util.toVariable(img).cuda()
             img_out = [img]
             for ref_data in ref_loader:
@@ -188,7 +188,7 @@ class Engine(object):
                 v[:, self.args.branch_idx:self.args.branch_idx + 1] = self.args.strength
                 v = util.toVariable(v).cuda()
                 img_ref_now = img_ref.expand_as(img)
-                out_now = test_model(img, img_ref_now, v)
+                out_now = test_model(img, img_ref_now, lm, lm, v)
                 img_out += [out_now]
                 # img_out += [img_ref]
             img_out = torch.cat(img_out)
