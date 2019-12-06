@@ -3,6 +3,7 @@ define the models for the homomorphic interpolation model
 '''
 import torch
 from torch import nn
+import torch.nn.functional as F
 from collections import OrderedDict
 from network import base_network
 
@@ -281,6 +282,96 @@ class discrim_landmark(nn.Module):
             attribute_now = branch_now(y).squeeze(2).squeeze(2)
             attributes += [attribute_now]
         return ifReal, attributes
+
+
+class SpatialAttentionLayer(nn.Module):
+    def __init__(self, in_num_ch, gate_num_ch, inter_num_ch, sample_factor=(2,2)):
+        super(SpatialAttentionLayer, self).__init__()
+
+        # in_num_ch, out_num_ch, kernel_size, stride, padding
+        self.W_x = nn.Conv2d(in_num_ch, inter_num_ch, sample_factor, sample_factor, bias=False)
+        self.W_g = nn.Conv2d(gate_num_ch, inter_num_ch, 1, 1)
+        self.W_psi = nn.Conv2d(inter_num_ch, 1, 1, 1)
+        self.W_out = nn.Sequential(
+            nn.Conv2d(in_num_ch, in_num_ch, 1, 1),
+            nn.BatchNorm2d(in_num_ch)
+        )
+
+    def forward(self, x, g):
+        x_size = x.size()
+        x_post = self.W_x(x)
+        x_post_size = x_post.size()
+
+        g_post = F.upsample(self.W_g(g), size=x_post_size[2:], mode='bilinear')
+        xg_post = F.relu(x_post + g_post, inplace=True)
+        alpha = F.sigmoid(self.W_psi(xg_post))
+        alpha_upsample = F.upsample(alpha, size=x_size[2:], mode='bilinear')
+
+        out = self.W_out(alpha_upsample * x)
+        return out, alpha_upsample
+
+class discrim_landmark_attention(nn.Module):
+    '''
+    attr is the input attribute list that is consistent with data/attreibuteDataset/Dataset_attr_merged_v2,
+    e.g., Moustache@#No_Beard@Goatee,Smile,Young,Bangs
+    '''
+
+    def __init__(self, attr, in_channels=512, lm_channels=64):
+        super(discrim_landmark_attention, self).__init__()
+        self.share_0 = nn.Sequential(
+            nn.Conv2d(in_channels+lm_channels, 256, 1),
+            nn.InstanceNorm2d(256, affine=True),
+            nn.LeakyReLU(0.2, True)
+        )
+        self.share_1 = nn.Sequential(
+            nn.Conv2d(256, 256, 4, padding=1, stride=2),
+            nn.InstanceNorm2d(256, affine=True),
+            nn.LeakyReLU(0.2, True)
+        )
+        self.share_2 = nn.Sequential(
+            nn.Conv2d(256, 256, 4, padding=1, stride=2),
+            nn.InstanceNorm2d(256, affine=True),
+            nn.LeakyReLU(0.2, True)
+        )
+        self.share_3 = nn.Conv2d(256, 256, 2)
+
+        self.ifReal = nn.Conv2d(256, 256, 1)
+
+        attr_branches = []
+        att_1_branches = []
+        att_2_branches = []
+        attr = attr.split(',')
+        for i in range(len(attr)):
+            att_1 = SpatialAttentionLayer(256, 256, 256, (4,4))
+            att_2 = SpatialAttentionLayer(256, 256, 256, (2,2))
+            attr_now = attr[i].split('@')
+            branch_now = nn.Conv2d(768, len(attr_now), 1)
+            attr_branches += [branch_now]
+            att_1_branches += [att_1]
+            att_2_branches += [att_2]
+        self.attr_branches = nn.ModuleList(attr_branches)
+        self.att_1 = nn.ModuleList(att_1_branches)
+        self.att_2 = nn.ModuleList(att_2_branches)
+
+    def forward(self, x, lm):
+        feat = torch.cat([x, lm], dim=1)
+        feat_0 = self.share_0(feat)
+        feat_1 = self.share_1(feat_0)
+        feat_2 = self.share_2(feat_1)
+        feat_3 = self.share_3(feat_2)
+        ifReal = self.ifReal(feat_3)
+
+        attributes = []
+        for branch_now, att_1, att_2 in zip(self.attr_branches, self.att_1, self.att_2):
+            feat_att_1, _ = att_1(feat_0, feat_2)
+            feat_att_1_avg = F.avg_pool2d(feat_att_1, 8)
+            feat_att_2, _ = att_2(feat_1, feat_2)
+            feat_att_2_avg = F.avg_pool2d(feat_att_2, 4)
+            feat_agg = torch.cat([feat_att_1_avg, feat_att_2_avg, feat_3], dim=1)
+            attribute_now = branch_now(feat_agg).squeeze(2).squeeze(2)
+            attributes += [attribute_now]
+        return ifReal, attributes
+
 
 class decoder2(nn.Module):
 

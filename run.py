@@ -78,7 +78,7 @@ class Engine(object):
             decoder = model.decoder2()
         else:
             raise NotImplementedError
-        discrim = model.discrim_landmark(self.args.attr)
+        discrim = model.discrim_landmark_attention(self.args.attr)
         discrim_identity = resnet50.Resnet50_ft()
         encoder = nn.DataParallel(encoder)
         encoder_landmark = nn.DataParallel(encoder_landmark)
